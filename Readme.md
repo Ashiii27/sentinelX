@@ -56,44 +56,44 @@ All detections are **mapped to MITRE ATT&CK techniques**, kill chain phase annot
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                        SENTINELX SYSTEM                         │
-│                                                                  │
+│                                                                 │
 │  ┌──────────────────────────────────────────────────────────┐   │
-│  │                   C++ ENGINE  (engine/)                   │   │
-│  │                                                           │   │
+│  │                   C++ ENGINE  (engine/)                  │   │
+│  │                                                          │   │
 │  │  ┌─────────────┐   ┌──────────────┐   ┌───────────────┐  │   │
 │  │  │  libpcap    │   │  Packet      │   │  Detectors    │  │   │
-│  │  │  Capture    │──▶│  Parser      │──▶│  ┌─────────┐  │  │   │
+│  │  │  Capture    │──▶│  Parser      │──▶│  ┌─────────┐ │  │   │
 │  │  │  Layer      │   │  (IP/TCP/    │   │  │PortScan │  │  │   │
 │  │  └─────────────┘   │  UDP/HTTP)   │   │  │SYNFlood │  │  │   │
 │  │                    └──────────────┘   │  │HTTP Anom│  │  │   │
 │  │  ┌─────────────┐                      │  │YARAMatch│  │  │   │
 │  │  │  libyara    │◀─────────────────────│  └─────────┘  │  │   │
 │  │  │  Rule Engine│                      └───────────────┘  │   │
-│  │  └─────────────┘                              │           │   │
-│  │                                               ▼           │   │
-│  │                                    ┌─────────────────┐    │   │
-│  │                                    │  Alert Emitter  │    │   │
-│  │                                    │  (JSON → stdout │    │   │
-│  │                                    │   / Unix socket)│    │   │
-│  │                                    └────────┬────────┘    │   │
-│  └─────────────────────────────────────────────│─────────────┘   │
-│                                                │                  │
-│  ┌─────────────────────────────────────────────▼─────────────┐   │
-│  │                NODE.JS BACKEND  (backend/)                 │   │
-│  │                                                            │   │
+│  │  └─────────────┘                              │          │   │
+│  │                                               ▼          │   │
+│  │                                    ┌─────────────────┐   │   │
+│  │                                    │  Alert Emitter  │   │   │
+│  │                                    │  (JSON → stdout     │   │
+│  │                                    │   / Unix socket)│   │   │
+│  │                                    └────────┬────────┘   │   │
+│  └─────────────────────────────────────────────│─────────────┘  │
+│                                                │                │
+│  ┌─────────────────────────────────────────────▼─────────────┐  │
+│  │                NODE.JS BACKEND  (backend/)                │   │
+│  │                                                           │   │
 │  │  ┌──────────────┐   ┌──────────────┐   ┌──────────────┐   │   │
 │  │  │  Alert       │   │  REST API    │   │  WebSocket   │   │   │
-│  │  │  Ingestion   │──▶│  (Express)   │   │  Server      │   │   │
+│  │  │  Ingestion   │──▶│  (Express)   │   │  Server     │   │   │
 │  │  │  Service     │   │              │   │  (live push) │   │   │
 │  │  └──────────────┘   └──────┬───────┘   └──────┬───────┘   │   │
-│  │                            │                   │           │   │
-│  │                    ┌───────▼───────────────────▼───────┐   │   │
-│  │                    │         MongoDB (Mongoose)         │   │   │
-│  │                    │  alerts / sessions / rules / stats │   │   │
-│  │                    └───────────────────────────────────┘   │   │
-│  └────────────────────────────────────────────────────────────┘   │
+│  │                            │                   │          │   │
+│  │                    ┌───────▼───────────────────▼───────┐  │   │
+│  │                    │         MongoDB (Mongoose)        │  │   │
+│  │                    │  alerts / sessions / rules / stats │ │   │
+│  │                    └───────────────────────────────────┘  │   │
+│  └────────────────────────────────────────────────────────────┘  │
 │                                                                  │
-│  ┌──────────────────────────────────────────────────────────┐   │
+│  ┌──────────────────────────────────────────────────────────┐    │
 │  │               REACT DASHBOARD  (dashboard/)               │   │
 │  │                                                           │   │
 │  │   Live Alert Feed  │  Threat Map  │  Kill Chain View      │   │
@@ -416,7 +416,7 @@ docker-compose up --build
 
 **Ash**  
 B.Tech Computer Science Engineering  
-Madan Mohan Malaviya University of Technology, Gorakhpur
+
 
 Focused on Blue Team security, SOC operations, and network forensics.
 
@@ -431,6 +431,3 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 ---
 
-<div align="center">
-<sub>Built with intent. Not just for placement — for understanding how defenders actually work.</sub>
-</div>
