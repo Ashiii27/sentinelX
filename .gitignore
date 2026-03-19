@@ -1,0 +1,26 @@
+﻿# C++ build artifacts
+engine/build/
+*.o
+*.a
+*.out
+
+# Node
+backend/node_modules/
+dashboard/node_modules/
+backend/.env
+
+# React build
+dashboard/dist/
+dashboard/build/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Logs
+*.log
