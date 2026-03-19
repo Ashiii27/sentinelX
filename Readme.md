@@ -341,7 +341,7 @@ sudo apt install -y \
 ### 1. Clone the repo
 
 ```bash
-git clone https://github.com/<your-username>/SentinelX.git
+git clone https://github.com/ashiii27/SentinelX.git
 cd SentinelX
 ```
 
