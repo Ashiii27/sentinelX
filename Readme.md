@@ -420,8 +420,8 @@ B.Tech Computer Science Engineering
 
 Focused on Blue Team security, SOC operations, and network forensics.
 
-[![TryHackMe](https://img.shields.io/badge/TryHackMe-Top%203%25-red?style=flat-square&logo=tryhackme)](https://tryhackme.com)
-[![GitHub](https://img.shields.io/badge/GitHub-Profile-181717?style=flat-square&logo=github)](https://github.com/<your-username>)
+[![TryHackMe](https://img.shields.io/badge/TryHackMe-Top%203%25-red?style=flat-square&logo=tryhackme)](https://tryhackme.com/p/Ashiii27)
+[![GitHub](https://img.shields.io/badge/GitHub-Profile-181717?style=flat-square&logo=github)](https://github.com/ashiii27)
 
 ---
 
