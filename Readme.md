@@ -414,7 +414,7 @@ docker-compose up --build
 
 ## Author
 
-**Ash**  
+**Ashish**  
 B.Tech Computer Science Engineering  
 
 
