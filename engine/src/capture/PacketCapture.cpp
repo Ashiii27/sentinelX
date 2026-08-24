@@ -46,9 +46,13 @@
 #include <vector>
 #include <cstring>
 
+#ifdef SENTINELX_WITH_LIBPCAP
 // libpcap
 #include <pcap/pcap.h>
+#endif
 
+
+#ifdef SENTINELX_WITH_LIBPCAP
 
 // ============================================================================
 //  CONSTRUCTOR
@@ -573,3 +577,77 @@ void PacketCapture::pcapCallback(uint8_t* user,
         std::cerr << "[PacketCapture] Unknown exception in packet handler\n";
     }
 }
+
+#else  // !SENTINELX_WITH_LIBPCAP — minimal build without libpcap
+
+// ============================================================================
+//  NO-LIBPCAP STUBS
+//  Live capture is unavailable in this build. The constructors throw so the
+//  engine fails loudly at startup (a NIDS that can't capture must not
+//  pretend to). Offline replay (PcapReplayer) is unaffected and fully
+//  functional — it never touches PacketCapture.
+// ============================================================================
+
+PacketCapture::PacketCapture(const CaptureConfig& config)
+    : m_config(config)
+    , m_handle(nullptr)
+    , m_running(false)
+    , m_packets_processed(0) {
+    throw std::runtime_error(
+        "[PacketCapture] This SentinelX build has no libpcap support — "
+        "live capture is unavailable. Use --replay <file.pcap> for offline "
+        "analysis, or rebuild with libpcap-dev installed "
+        "(see engine/CMakeLists.txt).");
+}
+
+PacketCapture::~PacketCapture() {
+    // Nothing to close — no handle was ever created.
+}
+
+void PacketCapture::start(PacketHandler handler) {
+    (void)handler;
+    throw std::runtime_error(
+        "[PacketCapture] start() called but this build has no libpcap "
+        "support.");
+}
+
+void PacketCapture::stop() {
+    // No loop was ever started.
+}
+
+bool PacketCapture::isRunning() const {
+    return false;
+}
+
+CaptureStats PacketCapture::getStats() const {
+    throw std::runtime_error(
+        "[PacketCapture] getStats() unavailable — no libpcap build.");
+}
+
+const std::string& PacketCapture::getInterface() const {
+    return m_config.interface;
+}
+
+const std::string& PacketCapture::getFilter() const {
+    return m_config.bpf_filter;
+}
+
+std::vector<std::string> PacketCapture::listInterfaces() {
+    return {};
+}
+
+void PacketCapture::openInterface() {}
+
+void PacketCapture::applyFilter() {}
+
+void PacketCapture::captureLoop() {}
+
+void PacketCapture::pcapCallback(uint8_t* user,
+                                 const struct pcap_pkthdr* header,
+                                 const uint8_t* data) {
+    (void)user;
+    (void)header;
+    (void)data;
+}
+
+#endif  // SENTINELX_WITH_LIBPCAP

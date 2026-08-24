@@ -61,9 +61,21 @@
 #include <stdexcept>
 #include <cstdint>
 
-// libpcap — raw packet capture
-// Must be installed: sudo apt install libpcap-dev
+// libpcap — raw packet capture.
+// Live capture requires libpcap-dev:  sudo apt install libpcap-dev
+//
+// The engine can also be built WITHOUT libpcap (SENTINELX_WITH_LIBPCAP
+// undefined, see CMakeLists.txt). In that mode PacketCapture degrades to
+// a stub that throws at construction — offline replay (PcapReplayer) and
+// every other subsystem keep working.
+#ifdef SENTINELX_WITH_LIBPCAP
 #include <pcap/pcap.h>
+using pcap_handle_t = pcap_t;
+#else
+struct pcap;        // opaque forward declaration — no libpcap needed
+struct pcap_pkthdr; // (only referenced in the private static callback)
+using pcap_handle_t = pcap;
+#endif
 
 
 // ============================================================================
@@ -363,7 +375,7 @@ private:
     // ────────────────────────────────────────────────────────────────────
 
     CaptureConfig        m_config;          // immutable capture configuration
-    pcap_t*              m_handle;          // libpcap session handle
+    pcap_handle_t*       m_handle;          // libpcap session handle
     std::thread          m_thread;          // background capture thread
     std::atomic<bool>    m_running;         // loop control flag (thread-safe)
     PacketHandler        m_handler;         // user-supplied packet callback

@@ -240,10 +240,10 @@ public:
      * @brief Check if a string contains basic SQL injection patterns.
      *
      * Detects common SQLi patterns in query strings or POST bodies:
-     *  - Quote + logic: ' OR, ' AND
-     *  - Union-based:   UNION SELECT
-     *  - Comment-based: --, #, /*
-     *  - Stacked:       ; DROP, ; INSERT
+ *  - Quote + logic: ' OR, ' AND
+ *  - Union-based:   UNION SELECT
+ *  - Comment-based: --, #, C-style block comments
+ *  - Stacked:       ; DROP, ; INSERT
      *
      * Note: This is a signature-based check, not a full parser.
      * False positives are possible for legitimate SQL in query strings.

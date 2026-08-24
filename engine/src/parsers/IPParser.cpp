@@ -136,8 +136,11 @@ std::optional<IPPacket> IPParser::parse(const RawPacket& pkt) {
     // ── Build result ──────────────────────────────────────────────────────
     IPPacket result;
 
-    result.raw_src_ip      = iph->src_ip;   // keep in network byte order
-    result.raw_dst_ip      = iph->dst_ip;
+    // Canonical form: the dotted-quad interpreted as a big-endian uint32
+    // (e.g. 192.168.1.5 → 0xC0A80105) on ANY host endianness — this is
+    // what the dashboard expects to see / round-trip.
+    result.raw_src_ip      = ntohl(iph->src_ip);
+    result.raw_dst_ip      = ntohl(iph->dst_ip);
     result.src_ip          = ipToString(reinterpret_cast<const uint8_t*>(&iph->src_ip));
     result.dst_ip          = ipToString(reinterpret_cast<const uint8_t*>(&iph->dst_ip));
     result.protocol        = iph->protocol;

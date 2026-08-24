@@ -33,6 +33,8 @@
 #include <optional>
 #include <cstdint>
 #include <chrono>
+#include <mutex>
+#include <random>
 #include <sstream>
 #include <iomanip>
 
@@ -92,8 +94,12 @@ enum class AlertType : uint8_t {
 /**
  * @enum Protocol
  * @brief Layer-4 protocol of the packet(s) that triggered the alert.
+ *
+ * Underlying type is uint16_t because the application-layer convenience
+ * values (HTTP=80, HTTPS=443) exceed the IANA protocol-number range that
+ * a uint8_t would hold.
  */
-enum class Protocol : uint8_t {
+enum class Protocol : uint16_t {
     UNKNOWN = 0,
     TCP     = 6,    // matches IANA protocol number
     UDP     = 17,   // matches IANA protocol number
@@ -559,12 +565,22 @@ private:
             system_clock::now().time_since_epoch()
         ).count();
 
-        // simple pseudo-random suffix — not cryptographic
-        uint16_t suffix = static_cast<uint16_t>(now_ms ^ (now_ms >> 16));
+        // Random suffix from a process-wide PRNG (seeded once, guarded
+        // because process() may run from the capture thread only, but
+        // the mutex keeps back-to-back generation cheap and unique).
+        // A deterministic f(now_ms) suffix collided whenever two alerts
+        // fired within the same millisecond.
+        static std::mt19937 rng{std::random_device{}()};
+        static std::mutex   rng_mu;
+        uint32_t suffix = 0;
+        {
+            std::lock_guard<std::mutex> lock(rng_mu);
+            suffix = rng();
+        }
 
         std::ostringstream oss;
         oss << now_ms << "_"
-            << std::hex << std::setw(4) << std::setfill('0') << suffix;
+            << std::hex << std::setw(8) << std::setfill('0') << suffix;
         return oss.str();
     }
 

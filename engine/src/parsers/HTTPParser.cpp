@@ -6,6 +6,12 @@
  * @project SentinelX
  */
 
+// memmem() is a POSIX.1-2008 / GNU extension; declare it before includes
+// so the parser builds even without libpcap's headers pulling it in.
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
 #include "HTTPParser.h"
 
 #include <sstream>
@@ -179,19 +185,31 @@ std::optional<HTTPPacket> HTTPParser::parse(const RawPacket& pkt,
 /**
  * Parses: "GET /path?query HTTP/1.1"
  *
- * Splits on spaces:
- *   token[0] = method
- *   token[1] = full URL (path + optional query string)
- *   token[2] = HTTP version
+ * Robust split: the FIRST space ends the method, the LAST space ends the
+ * protocol version; everything between is the URL target. Real-world
+ * (and attacking) requests sometimes carry literal spaces inside the
+ * URL — istringstream >> splitting would break those into 4+ tokens and
+ * reject the line, so the target is allowed to contain spaces.
  *
  * Separates path from query string at the '?' character.
  */
 bool HTTPParser::parseRequestLine(const std::string& line, HTTPPacket& out) {
-    std::istringstream iss(line);
-    std::string method, url, version;
+    const size_t first_space = line.find(' ');
+    if (first_space == std::string::npos || first_space == 0) {
+        return false;
+    }
+    const size_t last_space = line.rfind(' ');
+    if (last_space <= first_space) {
+        return false;  // fewer than 3 tokens
+    }
 
-    if (!(iss >> method >> url >> version)) {
-        return false;   // malformed — not 3 tokens
+    const std::string method  = line.substr(0, first_space);
+    const std::string url     =
+        line.substr(first_space + 1, last_space - first_space - 1);
+    const std::string version = line.substr(last_space + 1);
+
+    if (url.empty() || version.empty()) {
+        return false;
     }
 
     out.method       = method;
@@ -362,6 +380,42 @@ bool HTTPParser::isScannerUserAgent(const std::string& user_agent) {
 
 
 // ============================================================================
+//  URL decoding (for signature matching)
+// ============================================================================
+
+/**
+ * Minimal percent-decoding (%XX → byte, '+' → space) used for signature
+ * matching. Encoded attack payloads (%27%20OR%201=1--) would otherwise
+ * slip past plain-text patterns. Invalid sequences pass through unchanged;
+ * this is NOT a general-purpose decoder (no charset handling).
+ */
+static std::string urlDecodeForMatch(const std::string& in) {
+    auto hexval = [](char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return -1;
+    };
+
+    std::string out;
+    out.reserve(in.size());
+    for (size_t i = 0; i < in.size(); ++i) {
+        if (in[i] == '%' && i + 2 < in.size()) {
+            const int hi = hexval(in[i + 1]);
+            const int lo = hexval(in[i + 2]);
+            if (hi >= 0 && lo >= 0) {
+                out.push_back(static_cast<char>((hi << 4) | lo));
+                i += 2;
+                continue;
+            }
+        }
+        out.push_back(in[i] == '+' ? ' ' : in[i]);
+    }
+    return out;
+}
+
+
+// ============================================================================
 //  HTTPParser::hasPathTraversal
 // ============================================================================
 
@@ -375,6 +429,17 @@ bool HTTPParser::hasPathTraversal(const std::string& path) {
     for (int i = 0; TRAVERSAL_PATTERNS[i] != nullptr; ++i) {
         if (lower_path.find(TRAVERSAL_PATTERNS[i]) != std::string::npos) {
             return true;
+        }
+    }
+
+    // One decoding pass catches doubly-encoded traversal
+    // ("%252e%252e%252f" → "%2e%2e%2f" → "../").
+    std::string decoded = toLower(urlDecodeForMatch(path));
+    if (decoded != lower_path) {
+        for (int i = 0; TRAVERSAL_PATTERNS[i] != nullptr; ++i) {
+            if (decoded.find(TRAVERSAL_PATTERNS[i]) != std::string::npos) {
+                return true;
+            }
         }
     }
     return false;
@@ -394,6 +459,18 @@ bool HTTPParser::hasSQLInjection(const std::string& input) {
     for (int i = 0; SQLI_PATTERNS[i] != nullptr; ++i) {
         if (lower_input.find(SQLI_PATTERNS[i]) != std::string::npos) {
             return true;
+        }
+    }
+
+    // Encoded payloads: decode once and rescan ("%27%20OR%201=1--" →
+    // "' or 1=1--"). Only re-scan when decoding actually changed the
+    // string (avoids the copy cost for the common clean-traffic case).
+    std::string decoded = toLower(urlDecodeForMatch(input));
+    if (decoded != lower_input) {
+        for (int i = 0; SQLI_PATTERNS[i] != nullptr; ++i) {
+            if (decoded.find(SQLI_PATTERNS[i]) != std::string::npos) {
+                return true;
+            }
         }
     }
     return false;
