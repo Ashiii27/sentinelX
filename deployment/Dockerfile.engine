@@ -1,0 +1,40 @@
+# SentinelX — C++ engine image (multi-stage build)
+#
+# Built from the repo root:  docker build -f deployment/Dockerfile.engine .
+#
+# The engine must run with host networking + raw-socket privileges
+# (see docker-compose.yml): it captures live packets on the host NIC.
+
+FROM debian:trixie-slim AS build
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential cmake pkg-config \
+        libpcap-dev libyara-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+COPY engine/ engine/
+RUN cmake -S engine -B engine/build -DCMAKE_BUILD_TYPE=Release \
+ && cmake --build engine/build -j"$(nproc)"
+
+FROM debian:trixie-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libpcap0.8t64 libyara9 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /src/engine/build/sentinelx /usr/local/bin/sentinelx
+COPY engine/rules/ /etc/sentinelx/rules
+
+# Runs as root: raw packet capture requires CAP_NET_RAW (compose adds
+# privileged + host networking).
+WORKDIR /etc/sentinelx
+
+# Interface is injected by compose (SENTINELX_INTERFACE).
+ENTRYPOINT ["/usr/local/bin/sentinelx"]
+CMD [
+  "-i", "eth0",
+  "--socket", "/run/sentinelx/alerts.sock",
+  "--rules", "/etc/sentinelx/rules",
+  "--output", "socket"
+]

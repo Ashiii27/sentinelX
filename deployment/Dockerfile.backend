@@ -1,0 +1,27 @@
+# SentinelX — Node.js backend image
+#
+# Built from the repo root:  docker build -f deployment/Dockerfile.backend .
+
+FROM node:20-bookworm-slim
+
+WORKDIR /app
+
+# Install production deps first (layer cache).
+COPY backend/package.json backend/package-lock.json ./
+RUN npm ci --omit=dev --no-audit --no-fund
+
+COPY backend/ ./
+
+ENV NODE_ENV=production \
+    PORT=4000 \
+    ENGINE_SOCKET=/run/sentinelx/alerts.sock \
+    MONGO_URI=mongodb://mongo:27017/sentinelx \
+    RULES_DIR=/etc/sentinelx/rules
+
+# Shared volume with the engine for the socket + pidfile (the backend
+# listens on the socket, so it needs write access — hence root).
+VOLUME ["/run/sentinelx", "/etc/sentinelx/rules"]
+
+EXPOSE 4000
+
+CMD ["node", "src/app.js"]

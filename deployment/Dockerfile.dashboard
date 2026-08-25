@@ -1,0 +1,28 @@
+# SentinelX — dashboard image (Vite build → nginx)
+#
+# Built from the repo root:  docker build -f deployment/Dockerfile.dashboard .
+#
+# nginx serves the SPA and proxies /api + /ws to the backend compose
+# service (`backend:4000` — deployment/nginx.conf is sed-rewritten).
+
+FROM node:20-bookworm-slim AS build
+
+WORKDIR /src
+COPY dashboard/package.json dashboard/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY dashboard/ ./
+RUN npm run build
+
+FROM nginx:1.27-bookworm-slim
+
+# Same path the host-deployment nginx.conf expects.
+RUN mkdir -p /opt/sentinelx/dashboard
+COPY --from=build /src/dist/ /opt/sentinelx/dashboard/dist/
+
+# Point the upstream at the compose backend service.
+COPY deployment/nginx.conf /tmp/nginx.conf
+RUN sed 's|server 127.0.0.1:4000;|server backend:4000;|' /tmp/nginx.conf \
+        > /etc/nginx/conf.d/sentinelx.conf \
+ && rm -f /etc/nginx/conf.d/default.conf /tmp/nginx.conf
+
+EXPOSE 80

@@ -1,0 +1,83 @@
+# SentinelX — containerized stack
+#
+#   docker compose up --build
+#
+#   mongo      alert persistence (persistent volume)
+#   backend    REST API + WebSocket (:4000, exposed for local access)
+#   engine     C++ packet engine — host networking + privileged mode
+#              (raw packet capture)
+#   dashboard  nginx serving the SPA + API/WS proxy (:8080 → http://host:8080)
+#
+# The engine and backend share a volume for the Unix socket and pidfile.
+
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: deployment/Dockerfile.backend
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      MONGO_URI: mongodb://mongo:27017/sentinelx
+      ENGINE_SOCKET: /run/sentinelx/alerts.sock
+      ENGINE_PID_FILE: /run/sentinelx/sentinelx.pid
+      RULES_DIR: /etc/sentinelx/rules
+      # GEOIP_MMDB: /etc/sentinelx/GeoLite2-City.mmdb   # optional
+    volumes:
+      - sx-ipc:/run/sentinelx
+      - sx-rules:/etc/sentinelx/rules
+    ports:
+      - "4000:4000"
+
+  engine:
+    build:
+      context: .
+      dockerfile: deployment/Dockerfile.engine
+    restart: unless-stopped
+    depends_on:
+      - backend
+    # Raw capture needs the host's NICs:
+    network_mode: host
+    privileged: true
+    environment:
+      SENTINELX_INTERFACE: ${SENTINELX_INTERFACE:-eth0}
+    command:
+      - "-i"
+      - ${SENTINELX_INTERFACE:-eth0}
+      - "--socket"
+      - /run/sentinelx/alerts.sock
+      - "--rules"
+      - /etc/sentinelx/rules
+      - "--output"
+      - socket
+    volumes:
+      - sx-ipc:/run/sentinelx
+      - sx-rules:/etc/sentinelx/rules
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: deployment/Dockerfile.dashboard
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+
+volumes:
+  mongo-data:
+  sx-ipc:
+  sx-rules:

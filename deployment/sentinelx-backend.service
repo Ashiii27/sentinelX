@@ -1,0 +1,28 @@
+# SentinelX — Node.js backend (systemd)
+#
+# Installed by deployment/install.sh (substitutes __INSTALL_DIR__ / __PORT__).
+# Listens on :__PORT__ (REST /api + WebSocket /ws) and on the engine's
+# Unix socket /run/sentinelx/alerts.sock.
+
+[Unit]
+Description=SentinelX Node.js backend (REST API + WebSocket)
+After=network.target mongod.service
+Wants=mongod.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=__INSTALL_DIR__/backend
+Environment=NODE_ENV=production
+EnvironmentFile=-__INSTALL_DIR__/backend/.env
+ExecStart=/usr/bin/node __INSTALL_DIR__/backend/src/app.js
+Restart=on-failure
+RestartSec=3
+RuntimeDirectory=sentinelx
+
+# The socket lives under the runtime dir systemd creates for us.
+RuntimeDirectoryMode=0755
+
+[Install]
+WantedBy=multi-user.target

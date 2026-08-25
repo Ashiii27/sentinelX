@@ -62,7 +62,7 @@ All detections are **mapped to MITRE ATT&CK techniques**, kill chain phase annot
 │  │                                                          │   │
 │  │  ┌─────────────┐   ┌──────────────┐   ┌───────────────┐  │   │
 │  │  │  libpcap    │   │  Packet      │   │  Detectors    │  │   │
-│  │  │  Capture    │──▶│  Parser      │──▶│  ┌─────────┐ │  │   │
+│  │  │  Capture    │──▶│  Parser      │──▶│ ┌─────────┐  │  │   │
 │  │  │  Layer      │   │  (IP/TCP/    │   │  │PortScan │  │  │   │
 │  │  └─────────────┘   │  UDP/HTTP)   │   │  │SYNFlood │  │  │   │
 │  │                    └──────────────┘   │  │HTTP Anom│  │  │   │
@@ -73,7 +73,7 @@ All detections are **mapped to MITRE ATT&CK techniques**, kill chain phase annot
 │  │                                               ▼          │   │
 │  │                                    ┌─────────────────┐   │   │
 │  │                                    │  Alert Emitter  │   │   │
-│  │                                    │  (JSON → stdout     │   │
+│  │                                    │  (JSON → stdout │   │   │
 │  │                                    │   / Unix socket)│   │   │
 │  │                                    └────────┬────────┘   │   │
 │  └─────────────────────────────────────────────│─────────────┘  │
@@ -397,18 +397,43 @@ docker-compose up --build
 
 | Component | Status |
 |---|---|
-| C++ Engine — Packet Capture | 🔧 In Progress |
-| C++ Engine — Port Scan Detector | 🔧 In Progress |
-| C++ Engine — SYN Flood Detector | 📋 Planned |
-| C++ Engine — HTTP Anomaly Detector | 📋 Planned |
-| C++ Engine — YARA Integration | 📋 Planned |
-| Node.js Backend — REST API | 📋 Planned |
-| Node.js Backend — WebSocket Stream | 📋 Planned |
-| React Dashboard — Alert Feed | 📋 Planned |
-| React Dashboard — Threat Map | 📋 Planned |
-| React Dashboard — MITRE Matrix | 📋 Planned |
-| Deployment Scripts | 📋 Planned |
-| Docker Compose | 📋 Planned |
+| C++ Engine — Packet Capture (live + pcap replay) | ✅ Complete |
+| C++ Engine — Port Scan Detector | ✅ Complete |
+| C++ Engine — SYN Flood Detector | ✅ Complete |
+| C++ Engine — HTTP Anomaly Detector | ✅ Complete |
+| C++ Engine — Honeypot Detector | ✅ Complete |
+| C++ Engine — YARA Integration (+ hot reload via SIGUSR1) | ✅ Complete |
+| C++ Engine — Unit tests (8 CTest suites) | ✅ Complete |
+| Node.js Backend — REST API | ✅ Complete |
+| Node.js Backend — WebSocket Stream | ✅ Complete |
+| Node.js Backend — MongoDB + in-memory fallback | ✅ Complete |
+| Node.js Backend — YARA rules CRUD | ✅ Complete |
+| Node.js Backend — Tests (23 node:test) | ✅ Complete |
+| React Dashboard — Live Alert Feed | ✅ Complete |
+| React Dashboard — Threat Map (geo-IP) | ✅ Complete |
+| React Dashboard — Kill Chain + MITRE Matrix | ✅ Complete |
+| React Dashboard — Alerts browser + triage | ✅ Complete |
+| React Dashboard — YARA rule manager | ✅ Complete |
+| Deployment Scripts (systemd + nginx + install.sh) | ✅ Complete |
+| Docker Compose (mongo + backend + engine + dashboard) | ✅ Complete |
+| CI (GitHub Actions: engine, backend, dashboard) | ✅ Complete |
+
+## Documentation
+
+| Document | Contents |
+|---|---|
+| [docs/architecture.md](docs/architecture.md) | system design: pipeline, contracts, failure modes |
+| [docs/threat-model.md](docs/threat-model.md) | what each detector catches, thresholds, FP analysis, scope limits |
+| [docs/mitre-mapping.md](docs/mitre-mapping.md) | detector → ATT&CK technique mapping (incl. YARA rule meta) |
+| [docs/api-reference.md](docs/api-reference.md) | REST + WebSocket API with request/response examples |
+
+## One-Command Deployment (Linux)
+
+```bash
+sudo bash deployment/install.sh
+# or containerized:
+docker compose up --build
+```
 
 ---
 

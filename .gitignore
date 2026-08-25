@@ -1,4 +1,4 @@
-﻿# C++ build artifacts
+# C++ build artifacts
 engine/build/
 *.o
 *.a

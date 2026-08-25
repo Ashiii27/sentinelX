@@ -1,0 +1,31 @@
+# SentinelX — C++ detection engine (systemd)
+#
+# Installed by deployment/install.sh (which substitutes __INSTALL_DIR__).
+# The wrapper /usr/local/sbin/sentinelx-engine-run writes the pid file
+# the backend's rules hot-reload endpoint uses (SIGUSR1 → engine reloads
+# YARA rules and re-scans).
+
+[Unit]
+Description=SentinelX C++ packet detection engine
+After=network.target
+
+[Service]
+Type=simple
+# Raw socket capture needs root (or CAP_NET_RAW + CAP_NET_ADMIN).
+User=root
+Group=root
+ExecStart=/usr/local/sbin/sentinelx-engine-run
+# SIGTERM on stop is handled by the engine (flushes the emitter).
+ExecStop=/bin/kill -TERM $MAINPID
+TimeoutStopSec=10
+Restart=on-failure
+RestartSec=3
+
+# Hardening that is compatible with raw capture.
+NoNewPrivileges=false
+ProtectSystem=full
+RuntimeDirectory=sentinelx
+StateDirectory=sentinelx
+
+[Install]
+WantedBy=multi-user.target
