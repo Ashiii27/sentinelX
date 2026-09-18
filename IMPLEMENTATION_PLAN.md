@@ -21,26 +21,28 @@ The base version does **not** require every detector advertised in the README. S
 
 ## 2. Current repository baseline
 
-### Implemented or partially implemented
+The repository now contains the completed v0.1 vertical slice and the
+post-base detector/dashboard expansion described by the README. The
+original gap list below was used to guide implementation; it is retained
+in the phased roadmap as historical context.
 
-- C++17 CMake project under `engine/`.
-- Dependency-light `PortScanDetector` with configurable distinct-port threshold and time window.
-- `PacketEvent`, TCP flag classification, alert types, severity, network context, evidence, and MITRE mapping in `engine/src/`.
-- IPv4, TCP, and single-packet HTTP parser scaffolding, including recent bounds-validation work.
-- Optional libpcap capture target in `engine/CMakeLists.txt`.
-- A standalone port-scan test executable in `engine/tests/test_port_scan.cpp`.
-- README-level architecture, alert schema, detector goals, and quick-start documentation.
+### Implemented
 
-### Known gaps
-
-- `engine/main.cpp` and the complete capture-to-parse-to-detect pipeline are not wired.
-- Alert emission/serialization is not implemented as a dedicated component; the current alert helper is not a complete backend transport contract.
-- `SYNFloodDetector.cpp`, `HTTPAnomalyDetector.cpp`, `YARAScanner.cpp`, and related tests are empty.
-- Backend service, model, routes, WebSocket stream, package metadata, and environment template are empty placeholders.
-- Dashboard services, hooks, pages, and components are empty placeholders.
-- Architecture/API/threat-model/MITRE documentation files are empty.
-- Docker Compose and deployment files are not yet a verified runnable stack.
-- The current working tree contains uncommitted engine changes; future work must preserve or deliberately review those changes rather than resetting them.
+- C++17 engine runtime with live libpcap capture when available and a
+  dependency-free classic-PCAP replay path.
+- Bounds-checked IPv4, TCP, UDP, and single-packet HTTP parsing.
+- Port scan, SYN flood, HTTP anomaly, honeypot, and optional YARA
+  detection with bounded state, cooldowns, evidence, and MITRE mapping.
+- Canonical alert serialization as newline-delimited JSON, Unix-socket
+  delivery, optional PID-file management, and the checked-in
+  `docs/alert-schema.json` contract.
+- Node.js ingestion with frame-size limits, schema validation, ordering,
+  deduplication, MongoDB persistence, bounded in-memory fallback, REST,
+  WebSocket streaming, rules CRUD, and optional GeoIP enrichment.
+- React dashboard pages for overview, live/history alerts, triage,
+  statistics, threat map, kill chain, MITRE view, and YARA rules.
+- Offline C++ tests, backend end-to-end tests, CI, Docker Compose, and
+  Linux deployment assets.
 
 ## 3. Delivery principles
 
@@ -255,18 +257,18 @@ Do not start Phase 7 detector work by copying the README placeholders. Each dete
 
 ## 7. Base-version release checklist
 
-- [ ] Engine configures and builds with capture disabled.
-- [ ] Parser malformed-input tests pass.
-- [ ] Port-scan detector tests pass, including expiry and false-positive cases.
-- [ ] Replay mode emits schema-valid newline-delimited JSON.
-- [ ] Live capture path is isolated, documented, and tested where libpcap is available.
-- [ ] Backend validates, deduplicates, persists, and queries alerts.
-- [ ] WebSocket broadcasts accepted alerts.
-- [ ] Dashboard displays stored and live alerts.
-- [ ] End-to-end smoke test passes.
-- [ ] Docker/local setup is documented.
-- [ ] Architecture, API, threat model, MITRE mapping, and README status are current.
-- [ ] No secrets, generated builds, or machine-specific paths are committed.
+- [x] Engine configures and builds with capture disabled.
+- [x] Parser malformed-input tests pass.
+- [x] Port-scan detector tests pass, including expiry and false-positive cases.
+- [x] Replay mode emits schema-valid newline-delimited JSON.
+- [x] Live capture path is isolated, documented, and tested where libpcap is available.
+- [x] Backend validates, deduplicates, persists, and queries alerts.
+- [x] WebSocket broadcasts accepted alerts.
+- [x] Dashboard displays stored and live alerts.
+- [x] End-to-end smoke test passes.
+- [x] Docker/local setup is documented.
+- [x] Architecture, API, threat model, MITRE mapping, and README status are current.
+- [x] No secrets, generated builds, or machine-specific paths are committed.
 
 ## 8. Definition of done for SentinelX v0.1
 

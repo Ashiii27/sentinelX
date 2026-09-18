@@ -10,6 +10,7 @@
 
 #include <sstream>
 #include <cstring>
+#include <algorithm>
 #include <arpa/inet.h>      // ntohs(), ntohl()
 
 
@@ -53,20 +54,31 @@ std::optional<TCPPacket> TCPParser::parse(const RawPacket& pkt,
                                            const IPPacket& ip) {
 
     // ── Protocol check ───────────────────────────────────────────────────
-    if (ip.protocol != IPPROTO_TCP_NUM) {
-        return std::nullopt;    // not TCP
+    if (ip.protocol != IPPROTO_TCP_NUM || pkt.data == nullptr) {
+        return std::nullopt;    // not TCP or no capture buffer
+    }
+    // TCP reassembly is deliberately out of scope. Do not inspect an IP
+    // fragment as a complete transport packet.
+    if (ip.is_fragmented || ip.transport_offset < ETHERNET_HEADER_LEN ||
+        ip.total_length < ip.ip_header_len) {
+        return std::nullopt;
     }
 
     // ── Minimum length check ─────────────────────────────────────────────
     // Need at least transport_offset + 20 bytes for the minimum TCP header
-    if (pkt.capture_length < ip.transport_offset + sizeof(RawTCPHeader)) {
-        return std::nullopt;    // truncated
+    const uint64_t transport_end = static_cast<uint64_t>(ip.transport_offset) +
+                                   sizeof(RawTCPHeader);
+    const uint64_t ip_end = static_cast<uint64_t>(ETHERNET_HEADER_LEN) +
+                            ip.total_length;
+    if (transport_end > pkt.capture_length || transport_end > ip_end) {
+        return std::nullopt;    // truncated or header exceeds IP datagram
     }
 
     // ── Map TCP header over bytes ─────────────────────────────────────────
-    const RawTCPHeader* tcph = reinterpret_cast<const RawTCPHeader*>(
-        pkt.data + ip.transport_offset
-    );
+    RawTCPHeader tcp_header{};
+    std::memcpy(&tcp_header, pkt.data + ip.transport_offset,
+                sizeof(tcp_header));
+    const RawTCPHeader* tcph = &tcp_header;
 
     // ── Data offset validation ────────────────────────────────────────────
     // Upper 4 bits of data_off_reserved = TCP header length in 32-bit words
@@ -79,7 +91,9 @@ std::optional<TCPPacket> TCPParser::parse(const RawPacket& pkt,
     }
 
     // Check captured data is long enough for the full TCP header (with options)
-    if (pkt.capture_length < ip.transport_offset + tcp_header_bytes) {
+    const uint64_t header_end = static_cast<uint64_t>(ip.transport_offset) +
+                                tcp_header_bytes;
+    if (header_end > pkt.capture_length || header_end > ip_end) {
         return std::nullopt;    // truncated — options cut off
     }
 
@@ -95,13 +109,14 @@ std::optional<TCPPacket> TCPParser::parse(const RawPacket& pkt,
 
     if (payload_len < 0) payload_len = 0;   // guard against malformed total_length
 
-    // Clamp to actually captured bytes
-    // (payload_offset + payload_len might exceed capture_length for truncated packets)
+    // Clamp to both the declared IP datagram and captured bytes. A snaplen
+    // truncation is not a parser error once the transport header is present.
+    const uint64_t payload_end = std::min<uint64_t>(ip_end, pkt.capture_length);
     uint32_t actual_payload_len = static_cast<uint32_t>(payload_len);
-    if (payload_offset + actual_payload_len > pkt.capture_length) {
-        actual_payload_len = (payload_offset <= pkt.capture_length)
-                           ? (pkt.capture_length - payload_offset)
-                           : 0;
+    if (static_cast<uint64_t>(payload_offset) >= payload_end) {
+        actual_payload_len = 0;
+    } else if (static_cast<uint64_t>(payload_offset) + actual_payload_len > payload_end) {
+        actual_payload_len = static_cast<uint32_t>(payload_end - payload_offset);
     }
 
     // ── Build result ──────────────────────────────────────────────────────

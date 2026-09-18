@@ -48,7 +48,7 @@ function memFilterFromParams(items, params) {
     if (f.src_ip && a.src_ip !== f.src_ip) return false;
     if (f.dst_ip && a.dst_ip !== f.dst_ip) return false;
     if (f['mitre.technique_id'] &&
-        a.mitre.technique_id !== f['mitre.technique_id']) return false;
+        (!a.mitre || a.mitre.technique_id !== f['mitre.technique_id'])) return false;
     if (f.reviewed !== undefined && a.reviewed !== f.reviewed) return false;
     if (f.false_positive !== undefined &&
         a.false_positive !== f.false_positive) return false;
@@ -348,6 +348,7 @@ class AlertStore {
       protocol: alert.protocol,
       tcp_flags: alert.tcp_flags ?? 0,
       mitre: alert.mitre ?? {},
+      geo: alert.geo ?? null,
       evidence: alert.evidence ?? {},
       yara_match: alert.yara_match ?? null,
       raw_payload_hash: alert.raw_payload_hash ?? null,

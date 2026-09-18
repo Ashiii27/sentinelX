@@ -134,6 +134,12 @@ void PacketCapture::start(PacketHandler handler) {
             "Call stop() first."
         );
     }
+    // A capture thread can stop itself after a libpcap error. Reap that
+    // finished thread before allowing a new start; assigning over a
+    // joinable std::thread would terminate the process.
+    if (m_thread.joinable()) {
+        m_thread.join();
+    }
 
     if (!handler) {
         throw std::runtime_error(
@@ -171,11 +177,9 @@ void PacketCapture::start(PacketHandler handler) {
  * milliseconds (the maximum time pcap_dispatch blocks before returning).
  */
 void PacketCapture::stop() {
-    if (!m_running.load()) {
-        return;  // already stopped — no-op
-    }
-
-    m_running.store(false);
+    // Always join a completed-but-unreaped thread as well as an active one.
+    // This matters when pcap_dispatch exits because of a fatal error.
+    m_running.exchange(false);
 
     // pcap_breakloop() causes pcap_dispatch to return PCAP_ERROR_BREAK
     // on its next call even if the timeout hasn't expired.
@@ -432,19 +436,23 @@ void PacketCapture::applyFilter() {
                      1,                       // optimize
                      PCAP_NETMASK_UNKNOWN) != 0)
     {
+        const std::string detail = pcap_geterr(m_handle);
+        pcap_close(m_handle);
+        m_handle = nullptr;
         throw std::runtime_error(
             "[PacketCapture] BPF filter compile failed for expression \""
-            + m_config.bpf_filter + "\": "
-            + pcap_geterr(m_handle)
+            + m_config.bpf_filter + "\": " + detail
         );
     }
 
     // Install the compiled filter
     if (pcap_setfilter(m_handle, &fp) != 0) {
+        const std::string detail = pcap_geterr(m_handle);
         pcap_freecode(&fp);
+        pcap_close(m_handle);
+        m_handle = nullptr;
         throw std::runtime_error(
-            "[PacketCapture] pcap_setfilter() failed: "
-            + std::string(pcap_geterr(m_handle))
+            "[PacketCapture] pcap_setfilter() failed: " + detail
         );
     }
 

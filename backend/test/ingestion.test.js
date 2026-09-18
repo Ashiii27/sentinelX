@@ -117,6 +117,20 @@ test('ingestion: duplicate alert_id is not re-stored', async (t) => {
   });
 });
 
+test('ingestion: syntactically valid but invalid alerts are rejected', async (t) => {
+  await withIngestion(t, async (ingestion, store, socketPath) => {
+    const sock = await connectEngine(socketPath);
+    sock.write(JSON.stringify({ alert_id: 'missing-fields' }) + '\n');
+    await new Promise((r) => setTimeout(r, 100));
+    sock.end();
+
+    const { total } = await store.list({});
+    assert.equal(total, 0);
+    assert.equal(ingestion.stats.invalid, 1);
+    assert.equal(ingestion.stats.alerts, 0);
+  });
+});
+
 test('ingestion: engine restart replaces the connection', async (t) => {
   await withIngestion(t, async (ingestion, store, socketPath) => {
     const s1 = await connectEngine(socketPath);

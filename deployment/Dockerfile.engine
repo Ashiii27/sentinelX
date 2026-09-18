@@ -35,6 +35,7 @@ ENTRYPOINT ["/usr/local/bin/sentinelx"]
 CMD [
   "-i", "eth0",
   "--socket", "/run/sentinelx/alerts.sock",
+  "--pid-file", "/run/sentinelx/sentinelx.pid",
   "--rules", "/etc/sentinelx/rules",
   "--output", "socket"
 ]

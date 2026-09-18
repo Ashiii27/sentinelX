@@ -66,32 +66,36 @@ static_assert(sizeof(RawIPHeader) == 20,
 std::optional<IPPacket> IPParser::parse(const RawPacket& pkt) {
 
     // ── Minimum length check ─────────────────────────────────────────────
-    // Need at least: Ethernet header (14) + IP header min (20) = 34 bytes
-    if (pkt.capture_length < ETHERNET_HEADER_LEN + sizeof(RawIPHeader)) {
+    // Need at least: Ethernet header (14) + IP header min (20) = 34 bytes.
+    // RawPacket is a non-owning view, so validate the pointer before doing
+    // any arithmetic; malformed capture metadata must never become a read.
+    if (pkt.data == nullptr ||
+        pkt.capture_length < ETHERNET_HEADER_LEN + sizeof(RawIPHeader)) {
         return std::nullopt;    // packet too short to contain an IP header
+    }
+    if (pkt.wire_length != 0 && pkt.capture_length > pkt.wire_length) {
+        return std::nullopt;    // impossible capture metadata
     }
 
     const uint8_t* data = pkt.data;
 
     // ── EtherType check ──────────────────────────────────────────────────
-    // Bytes 12-13 of the Ethernet header contain the EtherType.
-    // Read as big-endian uint16_t using ntohs().
-    uint16_t ethertype = ntohs(
-        *reinterpret_cast<const uint16_t*>(data + 12)
-    );
+    // Bytes 12-13 of the Ethernet header contain the EtherType. Read the
+    // octets explicitly instead of dereferencing an unaligned uint16_t.
+    uint16_t ethertype = static_cast<uint16_t>(data[12] << 8 | data[13]);
 
     if (ethertype != ETHERTYPE_IPV4) {
         // ARP, IPv6, 802.1Q VLAN tags, etc. — not our concern in v1
         return std::nullopt;
     }
 
-    // ── Map IP header over bytes ──────────────────────────────────────────
-    // The IP header starts immediately after the 14-byte Ethernet header.
-    // We reinterpret_cast the raw bytes to our packed struct — valid because
-    // the struct has no padding and the alignment is handled by pragma pack.
-    const RawIPHeader* iph = reinterpret_cast<const RawIPHeader*>(
-        data + ETHERNET_HEADER_LEN
-    );
+    // ── Read IP header ───────────────────────────────────────────────────
+    // Copy into an aligned local object. Packed structs make the layout
+    // exact, but directly dereferencing one over a capture buffer is still
+    // undefined on architectures that reject unaligned access.
+    RawIPHeader ip_header{};
+    std::memcpy(&ip_header, data + ETHERNET_HEADER_LEN, sizeof(ip_header));
+    const RawIPHeader* iph = &ip_header;
 
     // ── Version check ────────────────────────────────────────────────────
     uint8_t version = (iph->ver_ihl >> 4);
@@ -112,6 +116,17 @@ std::optional<IPPacket> IPParser::parse(const RawPacket& pkt) {
     // Check that the captured data is long enough to contain the full IP header
     if (pkt.capture_length < ETHERNET_HEADER_LEN + ihl_bytes) {
         return std::nullopt;    // truncated — IHL claims more bytes than we have
+    }
+
+    const uint16_t total_length = ntohs(iph->total_len);
+    if (total_length < ihl_bytes) {
+        return std::nullopt;    // IP payload length underflows the header
+    }
+    // A capture may be snaplen-truncated (capture_length < wire_length),
+    // but the wire frame must still be large enough for the IP datagram.
+    if (pkt.wire_length != 0 &&
+        pkt.wire_length < ETHERNET_HEADER_LEN + total_length) {
+        return std::nullopt;
     }
 
     // ── Fragmentation check ───────────────────────────────────────────────
@@ -139,13 +154,17 @@ std::optional<IPPacket> IPParser::parse(const RawPacket& pkt) {
     // Canonical form: the dotted-quad interpreted as a big-endian uint32
     // (e.g. 192.168.1.5 → 0xC0A80105) on ANY host endianness — this is
     // what the dashboard expects to see / round-trip.
-    result.raw_src_ip      = ntohl(iph->src_ip);
-    result.raw_dst_ip      = ntohl(iph->dst_ip);
+    uint32_t src_wire = 0;
+    uint32_t dst_wire = 0;
+    std::memcpy(&src_wire, &iph->src_ip, sizeof(src_wire));
+    std::memcpy(&dst_wire, &iph->dst_ip, sizeof(dst_wire));
+    result.raw_src_ip      = ntohl(src_wire);
+    result.raw_dst_ip      = ntohl(dst_wire);
     result.src_ip          = ipToString(reinterpret_cast<const uint8_t*>(&iph->src_ip));
     result.dst_ip          = ipToString(reinterpret_cast<const uint8_t*>(&iph->dst_ip));
     result.protocol        = iph->protocol;
     result.ttl             = iph->ttl;
-    result.total_length    = ntohs(iph->total_len);
+    result.total_length    = total_length;
     result.ip_header_len   = ihl_bytes;
     result.is_fragmented   = is_fragmented;
     result.transport_offset = ETHERNET_HEADER_LEN + ihl_bytes;
@@ -194,7 +213,10 @@ std::string IPParser::ipToString(const uint8_t* ip_bytes) {
 bool IPParser::isPrivateIP(const std::string& ip) {
     // Use sscanf to extract octets
     int a, b, c, d;
-    if (sscanf(ip.c_str(), "%d.%d.%d.%d", &a, &b, &c, &d) != 4) {
+    char trailing = '\0';
+    if (sscanf(ip.c_str(), "%d.%d.%d.%d%c", &a, &b, &c, &d, &trailing) != 4 ||
+        a < 0 || a > 255 || b < 0 || b > 255 ||
+        c < 0 || c > 255 || d < 0 || d > 255) {
         return false;   // malformed IP string
     }
 
@@ -213,7 +235,10 @@ bool IPParser::isPrivateIP(const std::string& ip) {
 bool IPParser::isLoopback(const std::string& ip) {
     // Loopback range: 127.0.0.0/8
     int a, b, c, d;
-    if (sscanf(ip.c_str(), "%d.%d.%d.%d", &a, &b, &c, &d) != 4) {
+    char trailing = '\0';
+    if (sscanf(ip.c_str(), "%d.%d.%d.%d%c", &a, &b, &c, &d, &trailing) != 4 ||
+        a < 0 || a > 255 || b < 0 || b > 255 ||
+        c < 0 || c > 255 || d < 0 || d > 255) {
         return false;
     }
     return a == 127;

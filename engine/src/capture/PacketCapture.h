@@ -61,6 +61,8 @@
 #include <stdexcept>
 #include <cstdint>
 
+#include "RawPacket.h"
+
 // libpcap — raw packet capture.
 // Live capture requires libpcap-dev:  sudo apt install libpcap-dev
 //
@@ -115,14 +117,6 @@ using pcap_handle_t = pcap;
  *  For most protocols this is sufficient. If wire_length > capture_length,
  *  parsers must handle partial data gracefully — never assume full payload.
  */
-struct RawPacket {
-    const uint8_t* data           = nullptr;
-    uint32_t       capture_length = 0;
-    uint32_t       wire_length    = 0;
-    uint32_t       timestamp_sec  = 0;
-    uint32_t       timestamp_usec = 0;
-};
-
 /**
  * @typedef PacketHandler
  * @brief Callback type invoked for each captured packet.

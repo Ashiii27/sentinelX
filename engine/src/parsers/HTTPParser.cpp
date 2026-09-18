@@ -89,12 +89,13 @@ std::optional<HTTPPacket> HTTPParser::parse(const RawPacket& pkt,
                                              const TCPPacket& tcp) {
 
     // ── Empty payload check ──────────────────────────────────────────────
-    if (tcp.payload_length == 0) {
+    if (tcp.payload_length == 0 || pkt.data == nullptr) {
         return std::nullopt;    // SYN/ACK/FIN — no payload
     }
 
     // ── Bounds check ─────────────────────────────────────────────────────
-    if (tcp.payload_offset + tcp.payload_length > pkt.capture_length) {
+    if (static_cast<uint64_t>(tcp.payload_offset) + tcp.payload_length >
+        pkt.capture_length) {
         return std::nullopt;    // payload claims more bytes than we have
     }
 

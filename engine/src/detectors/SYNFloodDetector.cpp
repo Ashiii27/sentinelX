@@ -65,11 +65,17 @@ std::vector<Alert> SYNFloodDetector::process(const RawPacket& raw,
     DstState& st = it->second;
 
     if (is_syn) {
-        st.syn_times.push_back(ts_ms);
+        SynEvent event{ts_ms, ip.src_ip};
+        auto insert_at = std::upper_bound(
+            st.syn_events.begin(), st.syn_events.end(), ts_ms,
+            [](int64_t ts, const SynEvent& e) { return ts < e.ts_ms; });
+        st.syn_events.insert(insert_at, event);
         st.syn_by_src[ip.src_ip]++;
         m_syns_observed++;
     } else {  // is_synack
-        st.synack_times.push_back(ts_ms);
+        auto insert_at = std::upper_bound(
+            st.synack_times.begin(), st.synack_times.end(), ts_ms);
+        st.synack_times.insert(insert_at, ts_ms);
     }
 
     // Window maintenance — drop timestamps that fell out of the window.
@@ -77,8 +83,12 @@ std::vector<Alert> SYNFloodDetector::process(const RawPacket& raw,
 
     // ── Threshold check ─────────────────────────────────────────────────
 
-    const uint32_t syn_count    = static_cast<uint32_t>(st.syn_times.size());
-    const uint32_t synack_count = static_cast<uint32_t>(st.synack_times.size());
+    const uint32_t syn_count = static_cast<uint32_t>(std::count_if(
+        st.syn_events.begin(), st.syn_events.end(),
+        [ts_ms](const SynEvent& e) { return e.ts_ms <= ts_ms; }));
+    const uint32_t synack_count = static_cast<uint32_t>(std::count_if(
+        st.synack_times.begin(), st.synack_times.end(),
+        [ts_ms](int64_t t) { return t <= ts_ms; }));
 
     if (syn_count < m_config.syn_threshold) {
         return {};
@@ -101,7 +111,8 @@ std::vector<Alert> SYNFloodDetector::process(const RawPacket& raw,
 
     // A new alert window has begun (previous window fully elapsed) —
     // reset the escalation flag.
-    if (ts_ms - st.last_alert_ms >= static_cast<int64_t>(m_config.window_ms)) {
+    if (!st.has_alert ||
+        ts_ms - st.last_alert_ms >= static_cast<int64_t>(m_config.window_ms)) {
         st.escalated = false;
     }
 
@@ -111,8 +122,10 @@ std::vector<Alert> SYNFloodDetector::process(const RawPacket& raw,
     // escalation alert (CRITICAL) for the window, bypassing the cadence.
     // This gives the dashboard the "flood confirmed heavy" signal without
     // alert storms.
-    if (syn_count >= 4 * m_config.syn_threshold && !st.escalated) {
+    if (static_cast<uint64_t>(syn_count) >=
+            4ULL * m_config.syn_threshold && !st.escalated) {
         st.escalated     = true;
+        st.has_alert     = true;
         st.last_alert_ms = ts_ms;
         Alert alert = buildAlert(st, syn_count, synack_count, ts_ms);
         m_alerts_emitted++;
@@ -120,9 +133,11 @@ std::vector<Alert> SYNFloodDetector::process(const RawPacket& raw,
     }
 
     // Cadence: one alert per destination per window.
-    if (ts_ms - st.last_alert_ms < static_cast<int64_t>(m_config.window_ms)) {
+    if (st.has_alert &&
+        ts_ms - st.last_alert_ms < static_cast<int64_t>(m_config.window_ms)) {
         return {};
     }
+    st.has_alert = true;
     st.last_alert_ms = ts_ms;
 
     Alert alert = buildAlert(st, syn_count, synack_count, ts_ms);
@@ -134,7 +149,7 @@ std::vector<Alert> SYNFloodDetector::process(const RawPacket& raw,
 void SYNFloodDetector::tick(int64_t now_ms) {
     for (auto it = m_states.begin(); it != m_states.end(); ) {
         purge(it->second, now_ms);
-        if (it->second.syn_times.empty() &&
+        if (it->second.syn_events.empty() &&
             it->second.synack_times.empty()) {
             it = m_states.erase(it);
         } else {
@@ -158,18 +173,29 @@ void SYNFloodDetector::reset() {
 void SYNFloodDetector::purge(DstState& st, int64_t now_ms) {
     const int64_t window = static_cast<int64_t>(m_config.window_ms);
 
-    while (!st.syn_times.empty() && now_ms - st.syn_times.front() > window) {
-        st.syn_times.pop_front();
+    for (auto it = st.syn_events.begin(); it != st.syn_events.end(); ) {
+        if (now_ms >= it->ts_ms && now_ms - it->ts_ms > window) {
+            auto src = st.syn_by_src.find(it->src_ip);
+            if (src != st.syn_by_src.end()) {
+                if (src->second <= 1) st.syn_by_src.erase(src);
+                else --src->second;
+            }
+            it = st.syn_events.erase(it);
+        } else {
+            ++it;
+        }
     }
-    while (!st.synack_times.empty() &&
-           now_ms - st.synack_times.front() > window) {
-        st.synack_times.pop_front();
+    for (auto it = st.synack_times.begin(); it != st.synack_times.end(); ) {
+        if (now_ms >= *it && now_ms - *it > window) {
+            it = st.synack_times.erase(it);
+        } else {
+            ++it;
+        }
     }
 
-    // Keep the per-source attribution map bounded: drop sources whose
-    // recent SYNs have all expired. Cheap heuristic — recount is not worth
-    // it for a map that only affects an evidence field. If the map grows
-    // beyond a sane size (spoofed-source flood), clear the smallest half.
+    // Keep attribution bounded for spoofed-source floods. The counters are
+    // still exact for the retained event window; this cap only limits the
+    // amount of metadata used to build an alert.
     if (st.syn_by_src.size() > 4096) {
         std::vector<std::pair<std::string, uint32_t>> entries(
             st.syn_by_src.begin(), st.syn_by_src.end());

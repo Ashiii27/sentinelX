@@ -41,11 +41,9 @@ export function useAlerts(params = {}, { cap = DEFAULT_CAP } = {}) {
 
   const { status: wsStatus } = useWebSocket({
     onAlert: (alert) => upsert(alert),
-    onHistory: (hist) =>
-      hist
-        .slice()
-        .reverse()
-        .forEach((a) => upsert(a, { prepend: false })),
+    // AlertStream sends history newest-first. Prepending in that order
+    // keeps the merged list newest-first, just like REST and live events.
+    onHistory: (hist) => hist.forEach((a) => upsert(a)),
   });
 
   const refresh = useCallback(async () => {

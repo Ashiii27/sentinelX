@@ -61,9 +61,16 @@ async function createGeoIPEnricher({ mmdbPath = '', readerFactory = null } = {})
         (rec.city && rec.city.names && rec.city.names.en) || null;
       const lat = rec.location ? rec.location.latitude : null;
       const lon = rec.location ? rec.location.longitude : null;
-      const asn = rec.asn || null;
+      // GeoLite2-City does not contain ASN data, while an ASN database
+      // commonly exposes it as `autonomous_system_number`. Accept both
+      // the small test shape and the MaxMind-native shapes.
+      const asn =
+        rec.asn ||
+        (rec.traits && (rec.traits.autonomous_system_number || rec.traits.autonomous_system_organization)) ||
+        rec.autonomous_system_number ||
+        null;
 
-      if (!country && !city && lat === null) return null;
+      if (!country && !city && lat === null && lon === null && !asn) return null;
       return { country, city, lat, lon, asn };
     } catch (err) {
       // Per-IP lookup failures (e.g. unsupported family) are non-fatal.

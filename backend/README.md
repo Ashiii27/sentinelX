@@ -102,6 +102,6 @@ npm test
 * `alert_store.test.js` — store semantics: dedupe, filters, pagination,
   time ranges, triage, eviction, summary aggregation
 * `ingestion.test.js` — real Unix socket: NDJSON framing, split frames,
-  malformed lines, duplicate suppression, engine restart
+  schema validation, malformed lines, duplicate suppression, engine restart
 * `api.test.js` — end-to-end: fake engine → socket → store → REST +
   live WebSocket broadcast, rules CRUD over a temp directory

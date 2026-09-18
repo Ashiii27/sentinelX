@@ -12,19 +12,21 @@ require('dotenv').config({
   path: path.join(__dirname, '..', '.env'),
 });
 
-function intFromEnv(name, fallback) {
+function intFromEnv(name, fallback, { min = Number.MIN_SAFE_INTEGER, max = Number.MAX_SAFE_INTEGER } = {}) {
   const raw = process.env[name];
   if (raw === undefined || raw === '') return fallback;
-  const n = parseInt(raw, 10);
-  return Number.isFinite(n) ? n : fallback;
+  const n = Number.parseInt(raw, 10);
+  return Number.isInteger(n) && n >= min && n <= max ? n : fallback;
 }
 
 const config = {
   /** REST + WebSocket listen port */
-  port: intFromEnv('PORT', 4000),
+  port: intFromEnv('PORT', 4000, { min: 1, max: 65535 }),
 
   /** CORS: "*" or comma-separated origin list */
-  corsOrigin: process.env.CORS_ORIGIN || '*',
+  corsOrigin: process.env.CORS_ORIGIN
+    ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean).join(',')
+    : '*',
 
   /** MongoDB connection string (in-memory fallback when unreachable) */
   mongoUri: process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/sentinelx',
@@ -42,10 +44,10 @@ const config = {
     process.env.ENGINE_PID_FILE || '/run/sentinelx/sentinelx.pid',
 
   /** In-memory alert ring buffer capacity (degraded mode) */
-  memoryAlertCap: intFromEnv('MEMORY_ALERT_CAP', 20000),
+  memoryAlertCap: intFromEnv('MEMORY_ALERT_CAP', 20000, { min: 1, max: 1000000 }),
 
   /** How many recent alerts new WebSocket clients receive on connect */
-  wsHistoryCount: intFromEnv('WS_HISTORY_COUNT', 50),
+  wsHistoryCount: intFromEnv('WS_HISTORY_COUNT', 50, { min: 0, max: 500 }),
 
   /** Optional GeoLite2-City .mmdb path for Threat Map geo-IP enrichment.
    *  Empty = enrichment disabled (alerts flow through untouched). */

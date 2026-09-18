@@ -7,6 +7,7 @@
  */
 
 #include "PortScanDetector.h"
+#include "../parsers/UDPParser.h"
 
 #include <algorithm>
 #include <unordered_set>
@@ -55,23 +56,17 @@ std::vector<Alert> PortScanDetector::process(const RawPacket& raw,
         flags = tcp->flags;
         probe = isTcpProbe(*tcp);
     } else if (ip.protocol == IPPROTO_UDP_NUM) {
-        dport = 0;  // filled below from raw (no TCPPacket for UDP)
+        // Do not count malformed/truncated UDP headers as scans. The
+        // dedicated parser also validates the UDP length against IP length.
+        auto udp = UDPParser::parse(raw, ip);
+        if (!udp) return {};
+        dport = udp->dst_port;
         is_udp = true;
         probe  = true;
     }
 
     if (!probe) {
         return {};
-    }
-
-    // UDP port: extract from the raw packet (UDP header: src port 2B,
-    // dst port 2B — same layout as TCP, at the transport offset).
-    if (is_udp) {
-        if (ip.transport_offset + 4 <= raw.capture_length) {
-            const uint8_t* udp_hdr = raw.data + ip.transport_offset;
-            dport = static_cast<uint16_t>(
-                (static_cast<uint16_t>(udp_hdr[2]) << 8) | udp_hdr[3]);
-        }
     }
 
     // ── Update sliding window for this (src, dst) pair ──────────────────
@@ -96,7 +91,14 @@ std::vector<Alert> PortScanDetector::process(const RawPacket& raw,
 
     PairState& st = it->second;
 
-    st.probes.push_back(Probe{ts_ms, dport, flags, is_udp});
+    Probe probe_event{ts_ms, dport, flags, is_udp};
+    // Replay files and queued capture workers can deliver packets slightly
+    // out of order. Keep the deque timestamp-ordered so expiry and evidence
+    // remain deterministic instead of letting one old packet pin state.
+    auto insert_at = std::upper_bound(
+        st.probes.begin(), st.probes.end(), ts_ms,
+        [](int64_t ts, const Probe& p) { return ts < p.ts_ms; });
+    st.probes.insert(insert_at, probe_event);
     purgeExpired(st, ts_ms);
 
     // ── Threshold check ─────────────────────────────────────────────────
@@ -104,17 +106,19 @@ std::vector<Alert> PortScanDetector::process(const RawPacket& raw,
     const uint16_t min_ports = is_udp ? m_config.min_ports_udp
                                       : m_config.min_ports_tcp;
 
-    if (distinctPorts(st) < min_ports) {
+    if (distinctPorts(st, ts_ms) < min_ports) {
         return {};
     }
 
     // Cooldown: one alert per pair per cooldown_ms
-    if (ts_ms - st.last_alert_ms < static_cast<int64_t>(m_config.cooldown_ms)) {
+    if (st.has_alert &&
+        ts_ms - st.last_alert_ms < static_cast<int64_t>(m_config.cooldown_ms)) {
         return {};
     }
     st.last_alert_ms = ts_ms;
+    st.has_alert = true;
 
-    const std::string scan_type = majorityScanType(st);
+    const std::string scan_type = majorityScanType(st, ts_ms);
     Alert alert = buildAlert(st, scan_type, ts_ms);
     m_alerts_emitted++;
 
@@ -158,29 +162,31 @@ void PortScanDetector::purgeExpired(PairState& st, int64_t now_ms) const {
     // TCP and UDP probes may coexist in one pair's window (mixed scan).
     // Each protocol keeps its own window length, so a probe is expired
     // when it is older than ITS protocol's window.
-    while (!st.probes.empty()) {
-        const Probe& p = st.probes.front();
-        const uint32_t window = p.is_udp ? m_config.window_ms_udp
-                                         : m_config.window_ms_tcp;
-        if (now_ms - p.ts_ms > static_cast<int64_t>(window)) {
-            st.probes.pop_front();
+    for (auto it = st.probes.begin(); it != st.probes.end(); ) {
+        const uint32_t window = it->is_udp ? m_config.window_ms_udp
+                                          : m_config.window_ms_tcp;
+        if (now_ms >= it->ts_ms &&
+            now_ms - it->ts_ms > static_cast<int64_t>(window)) {
+            it = st.probes.erase(it);
         } else {
-            break;  // probes are chronological — the rest are fresher
+            ++it;
         }
     }
 }
 
 
-size_t PortScanDetector::distinctPorts(const PairState& st) const {
+size_t PortScanDetector::distinctPorts(const PairState& st,
+                                       int64_t now_ms) const {
     std::unordered_set<uint16_t> ports;
     for (const Probe& p : st.probes) {
-        ports.insert(p.dst_port);
+        if (p.ts_ms <= now_ms) ports.insert(p.dst_port);
     }
     return ports.size();
 }
 
 
-std::string PortScanDetector::majorityScanType(const PairState& st) const {
+std::string PortScanDetector::majorityScanType(const PairState& st,
+                                               int64_t now_ms) const {
     // Tally classifyScanType() across the window. UDP pairs report "UDP".
     // Ties resolve to "SYN" — the default Nmap scan and the least
     // surprising label for mixed traffic.
@@ -199,6 +205,7 @@ std::string PortScanDetector::majorityScanType(const PairState& st) const {
     };
 
     for (const Probe& p : st.probes) {
+        if (p.ts_ms > now_ms) continue;
         if (p.is_udp) {
             has_udp = true;
             continue;
@@ -251,16 +258,16 @@ Severity PortScanDetector::severityFor(const PairState& st,
 Alert PortScanDetector::buildAlert(const PairState& st,
                                    const std::string& scan_type,
                                    int64_t now_ms) const {
-    const uint32_t window_s = static_cast<uint32_t>(
-        (st.probes.empty() || st.probes.front().is_udp)
-            ? m_config.window_ms_udp : m_config.window_ms_tcp) / 1000;
+    const uint32_t window_s = (scan_type == "UDP"
+        ? m_config.window_ms_udp
+        : m_config.window_ms_tcp) / 1000;
 
     // Collect the distinct ports probed (sorted, capped) for the evidence.
     std::vector<uint16_t> ports;
     {
         std::unordered_set<uint16_t> seen;
         for (const Probe& p : st.probes) {
-            seen.insert(p.dst_port);
+            if (p.ts_ms <= now_ms) seen.insert(p.dst_port);
         }
         ports.assign(seen.begin(), seen.end());
         std::sort(ports.begin(), ports.end());
@@ -289,7 +296,10 @@ Alert PortScanDetector::buildAlert(const PairState& st,
     alert.evidence.ports_contacted = std::move(ports);
     alert.evidence.scan_type       = scan_type;
     alert.evidence.window_seconds  = window_s;
-    alert.evidence.packet_count    = static_cast<uint32_t>(st.probes.size());
+    const auto packet_count = static_cast<uint32_t>(std::count_if(
+        st.probes.begin(), st.probes.end(),
+        [now_ms](const Probe& p) { return p.ts_ms <= now_ms; }));
+    alert.evidence.packet_count = packet_count;
     alert.evidence.extra["first_seen_ms"] =
         std::to_string(st.probes.front().ts_ms);
     alert.evidence.extra["last_seen_ms"]  = std::to_string(now_ms);

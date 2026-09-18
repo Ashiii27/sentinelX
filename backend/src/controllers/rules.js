@@ -31,7 +31,8 @@ function rulesDir(req) {
 function ruleFilePath(req, name) {
   // Accept "shellcode_patterns" or "shellcode_patterns.yar".
   let base = String(name);
-  if (!base.endsWith('.yar') && !base.endsWith('.yara')) base += '.yar';
+  const lower = base.toLowerCase();
+  if (!lower.endsWith('.yar') && !lower.endsWith('.yara')) base += '.yar';
   const resolved = path.resolve(rulesDir(req), base);
   if (!resolved.startsWith(path.resolve(rulesDir(req)) + path.sep)) {
     throw Object.assign(new Error('invalid rule name'), { status: 400 });

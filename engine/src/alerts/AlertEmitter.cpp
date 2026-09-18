@@ -73,7 +73,7 @@ std::string AlertEmitter::toJson(const Alert& alert) {
     }
 
     // ── Evidence: include only populated fields ─────────────────────────
-    json ev;
+    json ev = json::object();
     const Evidence& e = alert.evidence;
 
     if (!e.ports_contacted.empty()) {
