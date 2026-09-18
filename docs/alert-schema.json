@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sentinelx.example/schemas/alert-v1.json",
+  "title": "SentinelX alert",
+  "description": "One newline-delimited alert emitted by the C++ engine and accepted by the backend.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "alert_id",
+    "timestamp",
+    "severity",
+    "type",
+    "src_ip",
+    "dst_ip",
+    "src_port",
+    "dst_port",
+    "protocol",
+    "mitre",
+    "evidence",
+    "yara_match",
+    "raw_payload_hash",
+    "description",
+    "false_positive",
+    "reviewed"
+  ],
+  "properties": {
+    "alert_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "severity": { "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"] },
+    "type": {
+      "enum": ["PORT_SCAN", "SYN_FLOOD", "HTTP_ANOMALY", "YARA_MATCH", "HONEYPOT_HIT"]
+    },
+    "src_ip": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "dst_ip": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "src_port": { "type": "integer", "minimum": 0, "maximum": 65535 },
+    "dst_port": { "type": "integer", "minimum": 0, "maximum": 65535 },
+    "protocol": { "enum": ["TCP", "UDP", "ICMP", "HTTP", "HTTPS", "UNKNOWN"] },
+    "tcp_flags": { "type": "integer", "minimum": 0, "maximum": 255 },
+    "mitre": {
+      "type": "object",
+      "required": ["technique_id", "technique_name", "tactic", "kill_chain_phase"],
+      "properties": {
+        "technique_id": { "type": "string", "minLength": 1 },
+        "technique_name": { "type": "string" },
+        "tactic": { "type": "string" },
+        "kill_chain_phase": { "type": "string" },
+        "reference_url": { "type": "string" }
+      }
+    },
+    "evidence": { "type": "object" },
+    "yara_match": {
+      "type": ["object", "null"],
+      "properties": {
+        "rule_name": { "type": "string" },
+        "rule_file": { "type": "string" },
+        "matched_strings": { "type": "array", "items": { "type": "string" } },
+        "payload_hash": { "type": "string" }
+      }
+    },
+    "raw_payload_hash": { "type": ["string", "null"] },
+    "description": { "type": "string", "maxLength": 4096 },
+    "false_positive": { "type": "boolean" },
+    "reviewed": { "type": "boolean" },
+    "geo": {
+      "type": ["object", "null"],
+      "properties": {
+        "country": { "type": ["string", "null"] },
+        "city": { "type": ["string", "null"] },
+        "lat": { "type": ["number", "null"] },
+        "lon": { "type": ["number", "null"] },
+        "asn": { "type": ["string", "number", "null"] }
+      }
+    }
+  }
+}

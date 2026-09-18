@@ -33,6 +33,17 @@ const mitreSchema = new Schema(
   { _id: false }
 );
 
+const geoSchema = new Schema(
+  {
+    country: { type: String, default: null },
+    city: { type: String, default: null },
+    lat: { type: Number, default: null },
+    lon: { type: Number, default: null },
+    asn: { type: String, default: null },
+  },
+  { _id: false }
+);
+
 const alertSchema = new Schema(
   {
     // ── Identity ────────────────────────────────────────────────────────
@@ -64,6 +75,9 @@ const alertSchema = new Schema(
       type: mitreSchema,
       default: () => ({}),
     },
+
+    // ── Optional GeoLite2 enrichment for the dashboard threat map ───────
+    geo: { type: geoSchema, default: null },
 
     // ── Evidence (detector-specific; shape varies by type) ──────────────
     evidence: { type: Schema.Types.Mixed, default: () => ({}) },

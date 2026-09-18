@@ -55,14 +55,21 @@
  */
 
 #include <atomic>
+#include <charconv>
 #include <chrono>
+#include <cerrno>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <string>
 #include <thread>
 #include <vector>
+
+#ifdef __unix__
+#include <unistd.h>
+#endif
 
 #include <nlohmann/json.hpp>
 
@@ -70,6 +77,7 @@
 #include "capture/PcapReplayer.h"
 #include "parsers/IPParser.h"
 #include "parsers/TCPParser.h"
+#include "parsers/UDPParser.h"
 #include "parsers/HTTPParser.h"
 #include "detectors/HoneypotDetector.h"
 #include "detectors/PortScanDetector.h"
@@ -110,6 +118,7 @@ struct EngineConfig {
     // Output
     AlertEmitter::Mode output      = AlertEmitter::Mode::UNIX_SOCKET;
     std::string        socket_path = "/run/sentinelx/alerts.sock";
+    std::string        pid_file;
 
     // Rules
     std::string rules_dir = "rules";
@@ -207,6 +216,15 @@ public:
             }
         }
 
+        UDPPacket udp_tmp;
+        const UDPPacket* udp = nullptr;
+        if (ip->protocol == IPPROTO_UDP_NUM) {
+            if (auto u = UDPParser::parse(raw, *ip)) {
+                udp_tmp = std::move(*u);
+                udp     = &udp_tmp;
+            }
+        }
+
         // ── HTTP layer (TCP with payload on a well-known HTTP port) ─────
         HTTPPacket  http_tmp;
         const HTTPPacket* http = nullptr;
@@ -240,19 +258,10 @@ public:
                 tcp->payload_length <= YARA_SCAN_MAX_PAYLOAD) {
                 payload = raw.data + tcp->payload_offset;
                 plen    = tcp->payload_length;
-            } else if (ip->protocol == IPPROTO_UDP_NUM &&
-                       ip->transport_offset + 8 <= raw.capture_length) {
-                const uint8_t* udp_hdr = raw.data + ip->transport_offset;
-                const uint16_t udp_hdr_len =
-                    (static_cast<uint16_t>(udp_hdr[6]) << 8) | udp_hdr[7];
-                size_t udp_payload_off = ip->transport_offset + udp_hdr_len;
-                if (udp_payload_off < raw.capture_length) {
-                    payload = raw.data + udp_payload_off;
-                    plen    = raw.capture_length - udp_payload_off;
-                    if (plen > YARA_SCAN_MAX_PAYLOAD) {
-                        plen = YARA_SCAN_MAX_PAYLOAD;
-                    }
-                }
+            } else if (udp && udp->payload_length > 0 &&
+                       udp->payload_length <= YARA_SCAN_MAX_PAYLOAD) {
+                payload = raw.data + udp->payload_offset;
+                plen = udp->payload_length;
             }
 
             if (payload && plen > 0) {
@@ -442,9 +451,10 @@ void printHelp() {
         "      --loop                Replay the file repeatedly (demo mode)\n"
         "\n"
         "OUTPUT\n"
-        "      --output <mode stdout | socket (default: socket)\n"
+        "      --output <mode>       stdout | socket (default: socket)\n"
         "      --socket <path>       Unix socket path for the backend\n"
         "                            (default: /run/sentinelx/alerts.sock)\n"
+        "      --pid-file <path>      Write the engine PID for rule reload\n"
         "\n"
         "DETECTION\n"
         "      --rules <dir>         YARA rules directory (default: ./rules)\n"
@@ -477,6 +487,21 @@ bool parseArgs(int argc, char** argv, EngineConfig& cfg, std::string& err) {
         }
         return argv[++i];
     };
+    auto parse_uint = [&](const char* raw, uint64_t max,
+                          const char* option, uint64_t& value) -> bool {
+        if (raw == nullptr || *raw == '\0') {
+            err = std::string("invalid ") + option + ": expected a number";
+            return false;
+        }
+        const char* end = raw + std::strlen(raw);
+        auto result = std::from_chars(raw, end, value);
+        if (result.ec != std::errc() || result.ptr != end || value > max) {
+            err = std::string("invalid ") + option + ": expected 0.." +
+                  std::to_string(max);
+            return false;
+        }
+        return true;
+    };
 
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
@@ -490,7 +515,12 @@ bool parseArgs(int argc, char** argv, EngineConfig& cfg, std::string& err) {
             cfg.bpf_filter = v;
         } else if (arg == "--snaplen") {
             if (!(v = need_value(i))) return false;
-            cfg.snaplen = std::atoi(v);
+            uint64_t value = 0;
+            if (!parse_uint(v, 65535, "--snaplen", value) || value == 0) {
+                if (value == 0 && err.empty()) err = "--snaplen must be greater than zero";
+                return false;
+            }
+            cfg.snaplen = static_cast<int>(value);
         } else if (arg == "--no-promisc") {
             cfg.promisc = false;
         } else if (arg == "--replay") {
@@ -513,6 +543,9 @@ bool parseArgs(int argc, char** argv, EngineConfig& cfg, std::string& err) {
         } else if (arg == "--socket") {
             if (!(v = need_value(i))) return false;
             cfg.socket_path = v;
+        } else if (arg == "--pid-file") {
+            if (!(v = need_value(i))) return false;
+            cfg.pid_file = v;
         } else if (arg == "--rules") {
             if (!(v = need_value(i))) return false;
             cfg.rules_dir       = v;
@@ -530,14 +563,26 @@ bool parseArgs(int argc, char** argv, EngineConfig& cfg, std::string& err) {
                                  : comma - start);
                 if (!item.empty()) {
                     auto colon = item.find(':');
+                    const std::string port_text =
+                        item.substr(0, colon == std::string::npos ? std::string::npos : colon);
+                    uint64_t port_value = 0;
+                    if (!parse_uint(port_text.c_str(), 65535, "--honeypot", port_value) ||
+                        port_value == 0) {
+                        if (port_value == 0 && err.empty()) {
+                            err = "--honeypot ports must be in the range 1..65535";
+                        }
+                        return false;
+                    }
                     HoneypotPort hp;
+                    hp.port = static_cast<uint16_t>(port_value);
                     if (colon == std::string::npos) {
-                        hp.port    = static_cast<uint16_t>(std::atoi(item.c_str()));
                         hp.service = "SERVICE";
                     } else {
-                        hp.port    = static_cast<uint16_t>(
-                            std::atoi(item.substr(0, colon).c_str()));
                         hp.service = item.substr(colon + 1);
+                        if (hp.service.empty()) {
+                            err = "--honeypot service names cannot be empty";
+                            return false;
+                        }
                     }
                     cfg.honeypot.ports.push_back(hp);
                 }
@@ -546,13 +591,28 @@ bool parseArgs(int argc, char** argv, EngineConfig& cfg, std::string& err) {
             }
         } else if (arg == "--scan-ports") {
             if (!(v = need_value(i))) return false;
-            cfg.scan.min_ports_tcp = static_cast<uint16_t>(std::atoi(v));
+            uint64_t value = 0;
+            if (!parse_uint(v, 65535, "--scan-ports", value) || value == 0) {
+                if (value == 0 && err.empty()) err = "--scan-ports must be greater than zero";
+                return false;
+            }
+            cfg.scan.min_ports_tcp = static_cast<uint16_t>(value);
         } else if (arg == "--syn-threshold") {
             if (!(v = need_value(i))) return false;
-            cfg.flood.syn_threshold = static_cast<uint32_t>(std::atoi(v));
+            uint64_t value = 0;
+            if (!parse_uint(v, UINT32_MAX, "--syn-threshold", value) || value == 0) {
+                if (value == 0 && err.empty()) err = "--syn-threshold must be greater than zero";
+                return false;
+            }
+            cfg.flood.syn_threshold = static_cast<uint32_t>(value);
         } else if (arg == "--stats-interval") {
             if (!(v = need_value(i))) return false;
-            cfg.stats_interval_s = static_cast<uint32_t>(std::atoi(v));
+            uint64_t value = 0;
+            if (!parse_uint(v, UINT32_MAX, "--stats-interval", value) || value == 0) {
+                if (value == 0 && err.empty()) err = "--stats-interval must be greater than zero";
+                return false;
+            }
+            cfg.stats_interval_s = static_cast<uint32_t>(value);
         } else if (arg == "--list-interfaces") {
             cfg.list_if = true;
         } else if (arg == "-V" || arg == "--version") {
@@ -568,6 +628,36 @@ bool parseArgs(int argc, char** argv, EngineConfig& cfg, std::string& err) {
 }
 
 }  // namespace
+
+/** Keep the optional PID file in sync with the running engine. */
+class PidFile {
+public:
+    explicit PidFile(const std::string& path) : m_path(path) {
+        if (m_path.empty()) return;
+        std::ofstream out(m_path, std::ios::trunc);
+        if (!out) {
+            std::fprintf(stderr, "[engine] warning: cannot write pid file %s: %s\n",
+                         m_path.c_str(), std::strerror(errno));
+            m_path.clear();
+            return;
+        }
+#ifdef __unix__
+        out << static_cast<long long>(::getpid()) << '\n';
+#else
+        out << 0 << '\n';
+#endif
+    }
+
+    ~PidFile() {
+        if (!m_path.empty()) std::remove(m_path.c_str());
+    }
+
+    PidFile(const PidFile&) = delete;
+    PidFile& operator=(const PidFile&) = delete;
+
+private:
+    std::string m_path;
+};
 
 
 // ============================================================================
@@ -620,6 +710,9 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "error: --replay requires a file argument\n");
         return 2;
     }
+
+    // Keep the PID file alive until every pipeline object has shut down.
+    PidFile pid_file(cfg.pid_file);
 
     // ── Signal handling ──────────────────────────────────────────────────
     std::signal(SIGINT, onShutdown);
@@ -779,6 +872,7 @@ int main(int argc, char** argv) {
 #endif
     }
 
-    pipeline.logSummary(cfg.replay ? "replay" : "live");
+    // Pipeline's destructor emits the single final summary after all input
+    // resources have been released.
     return 0;
 }

@@ -184,6 +184,7 @@ SentinelX/
 │   └── nginx.conf                 # reverse proxy config
 │
 ├── docs/
+│   ├── alert-schema.json          # canonical NDJSON alert contract
 │   ├── architecture.md            # deep-dive system design
 │   ├── threat-model.md            # what SentinelX detects and how
 │   ├── mitre-mapping.md           # ATT&CK technique → detector mapping
@@ -376,7 +377,7 @@ npm run dev
 
 ```bash
 cd ../engine/build
-sudo ./sentinelx --interface eth0 --rules ../../rules/
+sudo ./sentinelx --interface eth0 --rules ../rules/
 ```
 
 Dashboard will be live at `http://localhost:5173`
@@ -408,7 +409,7 @@ docker-compose up --build
 | Node.js Backend — WebSocket Stream | ✅ Complete |
 | Node.js Backend — MongoDB + in-memory fallback | ✅ Complete |
 | Node.js Backend — YARA rules CRUD | ✅ Complete |
-| Node.js Backend — Tests (23 node:test) | ✅ Complete |
+| Node.js Backend — Tests (24 node:test) | ✅ Complete |
 | React Dashboard — Live Alert Feed | ✅ Complete |
 | React Dashboard — Threat Map (geo-IP) | ✅ Complete |
 | React Dashboard — Kill Chain + MITRE Matrix | ✅ Complete |
@@ -422,6 +423,7 @@ docker-compose up --build
 
 | Document | Contents |
 |---|---|
+| [docs/alert-schema.json](docs/alert-schema.json) | canonical NDJSON alert contract |
 | [docs/architecture.md](docs/architecture.md) | system design: pipeline, contracts, failure modes |
 | [docs/threat-model.md](docs/threat-model.md) | what each detector catches, thresholds, FP analysis, scope limits |
 | [docs/mitre-mapping.md](docs/mitre-mapping.md) | detector → ATT&CK technique mapping (incl. YARA rule meta) |

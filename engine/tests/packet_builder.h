@@ -50,7 +50,9 @@ inline void appendEthernet(std::vector<uint8_t>& buf) {
         0x00, 0x00, 0x00, 0x00, 0x00, 0x02,          // src
         0x08, 0x00                                    // IPv4
     };
-    buf.insert(buf.end(), eth, eth + 14);
+    const size_t start = buf.size();
+    buf.resize(start + sizeof(eth));
+    std::memcpy(buf.data() + start, eth, sizeof(eth));
 }
 
 

@@ -11,6 +11,7 @@
 
 #include "../src/parsers/IPParser.h"
 #include "../src/parsers/TCPParser.h"
+#include "../src/parsers/UDPParser.h"
 #include "../src/parsers/HTTPParser.h"
 
 
@@ -139,6 +140,30 @@ static void test_tcp_non_tcp_packet() {
     CHECK(!TCPParser::parse(raw, *ip).has_value());
 }
 
+static void test_udp_parser() {
+    auto frame = pktbuild::makeUDP("1.2.3.4", "5.6.7.8", 40000, 5353, "dns");
+    auto raw = pktbuild::asRaw(frame, pktbuild::T0);
+    auto ip = IPParser::parse(raw);
+    CHECK(ip.has_value());
+    if (!ip) return;
+
+    auto udp = UDPParser::parse(raw, *ip);
+    CHECK(udp.has_value());
+    if (udp) {
+        CHECK_EQ(udp->src_port, static_cast<uint16_t>(40000));
+        CHECK_EQ(udp->dst_port, static_cast<uint16_t>(5353));
+        CHECK_EQ(udp->payload_length, static_cast<uint32_t>(3));
+    }
+
+    // UDP length smaller than the fixed header is malformed.
+    frame[14 + 20 + 4] = 0;
+    frame[14 + 20 + 5] = 7;
+    raw = pktbuild::asRaw(frame, pktbuild::T0);
+    ip = IPParser::parse(raw);
+    CHECK(ip.has_value());
+    if (ip) CHECK(!UDPParser::parse(raw, *ip).has_value());
+}
+
 
 // ============================================================================
 //  HTTPParser
@@ -246,6 +271,7 @@ int main() {
     test_tcp_parser();
     test_tcp_scan_classification();
     test_tcp_non_tcp_packet();
+    test_udp_parser();
     test_http_request_parse();
     test_http_response_parse();
     test_http_signature_helpers();

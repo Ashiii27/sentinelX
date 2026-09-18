@@ -7,6 +7,11 @@ proxy forwards them.
 
 Base path: **`/api`** (all paths below are relative to it).
 
+The canonical engine contract is checked in at
+[`docs/alert-schema.json`](alert-schema.json). Engine output is newline-
+delimited JSON (one complete object per line); the backend validates each
+frame before enrichment or persistence.
+
 ---
 
 ## Contents

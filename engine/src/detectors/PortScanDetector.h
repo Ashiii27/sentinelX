@@ -159,6 +159,7 @@ private:
     struct PairState {
         std::deque<Probe> probes;        // chronological, oldest first
         int64_t           last_alert_ms  = 0;  // cooldown anchor
+        bool              has_alert      = false;
         std::string       src_ip;        // cached for alert construction
         std::string       dst_ip;
         uint32_t          raw_src_ip     = 0; // for key construction in alerts
@@ -176,10 +177,10 @@ private:
     void purgeExpired(PairState& st, int64_t now_ms) const;
 
     /// Count distinct ports currently in a pair's window (protocol-aware).
-    size_t distinctPorts(const PairState& st) const;
+    size_t distinctPorts(const PairState& st, int64_t now_ms) const;
 
     /// Majority scan type across the window: "SYN", "NULL", "FIN", "XMAS", "UDP"
-    std::string majorityScanType(const PairState& st) const;
+    std::string majorityScanType(const PairState& st, int64_t now_ms) const;
 
     /// Choose severity: internal vs external source, aggressive flags.
     Severity severityFor(const PairState& st, const std::string& scan_type) const;

@@ -52,6 +52,16 @@ cmake -S . -B build \
 
 ### Minimal build (no libpcap / no YARA)
 
+The engine degrades gracefully and still compiles. Use the explicit
+feature switches when optional development libraries are installed, or
+`SENTINELX_FORCE_MINIMAL=ON` to disable both:
+
+```bash
+cmake -S . -B build \
+  -DSENTINELX_BUILD_CAPTURE=OFF \
+  -DSENTINELX_BUILD_YARA=OFF
+```
+
 The engine degrades gracefully and still compiles:
 
 * **No libpcap** — live capture is unavailable; `PacketCapture` throws a
@@ -106,6 +116,7 @@ stats/summary line is printed at shutdown.
 --loop                     replay repeatedly until SIGINT (demo)
 --output <mode>            stdout | socket (default socket)
 --socket <path>            Unix socket path (default /run/sentinelx/alerts.sock)
+--pid-file <path>          Write a PID file for backend rule reloads
 --rules <dir>              YARA rules directory (default ./rules)
 --honeypot <list>          e.g. "2222:SSH,8888:HTTP" (default 2222:SSH,8888:HTTP)
 --scan-ports <n>           distinct ports triggering scan alert (default 10)
@@ -169,7 +180,7 @@ once at first load.
 | Port scan | ≥ N distinct ports per source in a sliding 5 s window (SYN/NULL/FIN/XMAS/UDP) | T1046 | external HIGH, internal MEDIUM; +1 for stealth (NULL/FIN/XMAS) |
 | SYN flood | ≥ N SYNs to one destination per window with no SYN-ACK responses | T1498.001 | HIGH; one CRITICAL escalation at 4× threshold |
 | HTTP anomaly | Path traversal (raw + encoded), SQLi (raw + URL-decoded), null-byte WAF bypass, oversized headers, scanner User-Agents, unusual verbs (TRACE/TRACK/CONNECT), malformed HTTP | T1190 (T1595.002 for scanner UAs) | per-kind |
-| YARA | Signature matches on every TCP/UDP payload ≤ 8 KB | per-rule meta | per-rule meta |
+| YARA | Signature matches on every TCP/UDP payload ≤ 64 KB | per-rule meta | per-rule meta |
 
 Cooldowns dedupe bursts: one alert per (source, kind) per cooldown
 window per detector — a flood of matching packets produces one alert,
@@ -222,7 +233,7 @@ Conventions:
 Eight standalone test suites (each an executable with its own `main`):
 
 ```bash
-cmake -S . -B build -DSENTINELX_BUILD_TESTS=ON
+cmake -S . -B build -DSENTINELX_ENABLE_TESTS=ON
 cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```

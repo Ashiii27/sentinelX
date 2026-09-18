@@ -127,12 +127,18 @@ private:
      * @struct DstState
      * @brief Sliding-window SYN/SYNACK counters for one destination IP.
      */
+    struct SynEvent {
+        int64_t     ts_ms;
+        std::string src_ip;
+    };
+
     struct DstState {
         std::string              dst_ip;
-        std::deque<int64_t>      syn_times;      // timestamps of SYNs
+        std::deque<SynEvent>     syn_events;     // timestamp + attribution
         std::deque<int64_t>      synack_times;   // timestamps of SYN+ACKs
-        std::unordered_map<std::string, uint32_t> syn_by_src;  // attribution
+        std::unordered_map<std::string, uint32_t> syn_by_src;  // current window
         int64_t                  last_alert_ms = 0;
+        bool                     has_alert     = false;
         bool                     escalated     = false;  // CRITICAL sent this
                                                          // alert window
     };

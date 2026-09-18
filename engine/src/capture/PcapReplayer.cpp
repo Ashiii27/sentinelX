@@ -117,8 +117,12 @@ bool PcapReplayer::open(const std::string& path, std::string& err) {
     }
 
     // ── Version ──────────────────────────────────────────────────────────
-    const uint16_t ver_major = readU16Host(*reinterpret_cast<uint16_t*>(gh + 4));
-    const uint16_t ver_minor = readU16Host(*reinterpret_cast<uint16_t*>(gh + 6));
+    uint16_t raw_ver_major = 0;
+    uint16_t raw_ver_minor = 0;
+    std::memcpy(&raw_ver_major, gh + 4, sizeof(raw_ver_major));
+    std::memcpy(&raw_ver_minor, gh + 6, sizeof(raw_ver_minor));
+    const uint16_t ver_major = readU16Host(raw_ver_major);
+    const uint16_t ver_minor = readU16Host(raw_ver_minor);
     if (ver_major != PCAPF_VERSION_MAJOR || ver_minor != PCAPF_VERSION_MINOR) {
         err = "unsupported pcap version " + std::to_string(ver_major) + "." +
               std::to_string(ver_minor);
@@ -127,8 +131,12 @@ bool PcapReplayer::open(const std::string& path, std::string& err) {
     }
 
     // ── Link type ────────────────────────────────────────────────────────
-    const uint32_t snaplen = readU32Host(*reinterpret_cast<uint32_t*>(gh + 16));
-    const uint32_t network = readU32Host(*reinterpret_cast<uint32_t*>(gh + 20));
+    uint32_t raw_snaplen = 0;
+    uint32_t raw_network = 0;
+    std::memcpy(&raw_snaplen, gh + 16, sizeof(raw_snaplen));
+    std::memcpy(&raw_network, gh + 20, sizeof(raw_network));
+    const uint32_t snaplen = readU32Host(raw_snaplen);
+    const uint32_t network = readU32Host(raw_network);
     m_snaplen = snaplen;
 
     if (network != PCAPF_DLT_EN10MB) {
@@ -178,13 +186,23 @@ bool PcapReplayer::next(RawPacket& out) {
         return false;  // clean EOF
     }
 
-    const uint32_t ts_sec    = readU32Host(*reinterpret_cast<uint32_t*>(rh + 0));
-    const uint32_t ts_frac   = readU32Host(*reinterpret_cast<uint32_t*>(rh + 4));
-    const uint32_t incl_len  = readU32Host(*reinterpret_cast<uint32_t*>(rh + 8));
-    const uint32_t orig_len  = readU32Host(*reinterpret_cast<uint32_t*>(rh + 12));
+    uint32_t raw_ts_sec = 0;
+    uint32_t raw_ts_frac = 0;
+    uint32_t raw_incl_len = 0;
+    uint32_t raw_orig_len = 0;
+    std::memcpy(&raw_ts_sec, rh + 0, sizeof(raw_ts_sec));
+    std::memcpy(&raw_ts_frac, rh + 4, sizeof(raw_ts_frac));
+    std::memcpy(&raw_incl_len, rh + 8, sizeof(raw_incl_len));
+    std::memcpy(&raw_orig_len, rh + 12, sizeof(raw_orig_len));
+    const uint32_t ts_sec = readU32Host(raw_ts_sec);
+    const uint32_t ts_frac = readU32Host(raw_ts_frac);
+    const uint32_t incl_len = readU32Host(raw_incl_len);
+    const uint32_t orig_len = readU32Host(raw_orig_len);
 
-    // Guard against corrupt headers claiming absurd lengths.
-    if (incl_len > 0x800000) {  // > 8 MB per packet is not a real capture
+    // Guard against corrupt headers claiming absurd lengths or impossible
+    // timestamps. A captured length cannot exceed the original wire frame.
+    const uint32_t max_fraction = m_ns_precision ? 1000000000u : 1000000u;
+    if (incl_len > 0x800000 || orig_len < incl_len || ts_frac >= max_fraction) {
         return false;
     }
 

@@ -19,6 +19,102 @@ const net = require('net');
 const fs = require('fs');
 const { EventEmitter } = require('events');
 
+const MAX_FRAME_BYTES = 1024 * 1024;
+const SEVERITIES = new Set(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']);
+const ALERT_TYPES = new Set([
+  'PORT_SCAN',
+  'SYN_FLOOD',
+  'HTTP_ANOMALY',
+  'YARA_MATCH',
+  'HONEYPOT_HIT',
+]);
+const PROTOCOLS = new Set(['TCP', 'UDP', 'ICMP', 'HTTP', 'HTTPS', 'UNKNOWN']);
+
+/**
+ * Validate the engine-to-backend contract before any enrichment or storage.
+ * JSON.parse only proves that a frame is syntactically JSON; accepting a
+ * partial object would make bad input look like a real detection in the
+ * dashboard and, with MongoDB enabled, can also fail asynchronously.
+ *
+ * @returns {{valid: boolean, error?: string}}
+ */
+function validateAlert(alert) {
+  if (!alert || typeof alert !== 'object' || Array.isArray(alert)) {
+    return { valid: false, error: 'alert must be a JSON object' };
+  }
+
+  const requiredStrings = [
+    ['alert_id', 256],
+    ['timestamp', 64],
+    ['src_ip', 64],
+    ['dst_ip', 64],
+  ];
+  for (const [field, max] of requiredStrings) {
+    if (typeof alert[field] !== 'string' || alert[field].length === 0) {
+      return { valid: false, error: `${field} must be a non-empty string` };
+    }
+    if (alert[field].length > max) {
+      return { valid: false, error: `${field} exceeds ${max} characters` };
+    }
+  }
+
+  if (!Number.isFinite(Date.parse(alert.timestamp))) {
+    return { valid: false, error: 'timestamp must be an ISO-compatible date' };
+  }
+  if (net.isIP(alert.src_ip) === 0 || net.isIP(alert.dst_ip) === 0) {
+    return { valid: false, error: 'src_ip and dst_ip must be valid IP addresses' };
+  }
+  if (!SEVERITIES.has(alert.severity)) {
+    return { valid: false, error: 'severity is invalid' };
+  }
+  if (!ALERT_TYPES.has(alert.type)) {
+    return { valid: false, error: 'type is invalid' };
+  }
+  if (!PROTOCOLS.has(alert.protocol)) {
+    return { valid: false, error: 'protocol is invalid' };
+  }
+
+  for (const field of ['src_port', 'dst_port']) {
+    if (!Number.isInteger(alert[field]) || alert[field] < 0 || alert[field] > 65535) {
+      return { valid: false, error: `${field} must be an integer from 0 to 65535` };
+    }
+  }
+  if (alert.protocol === 'TCP' && !Number.isInteger(alert.tcp_flags)) {
+    return { valid: false, error: 'tcp_flags must be an integer for TCP alerts' };
+  }
+  if (alert.tcp_flags !== undefined &&
+      (!Number.isInteger(alert.tcp_flags) || alert.tcp_flags < 0 || alert.tcp_flags > 255)) {
+    return { valid: false, error: 'tcp_flags must be an integer from 0 to 255' };
+  }
+  if (!alert.mitre || typeof alert.mitre !== 'object' || Array.isArray(alert.mitre) ||
+      typeof alert.mitre.technique_id !== 'string' || alert.mitre.technique_id.length === 0) {
+    return { valid: false, error: 'mitre.technique_id is required' };
+  }
+  if (alert.evidence !== undefined &&
+      (!alert.evidence || typeof alert.evidence !== 'object' || Array.isArray(alert.evidence))) {
+    return { valid: false, error: 'evidence must be a JSON object' };
+  }
+  if (alert.description !== undefined &&
+      (typeof alert.description !== 'string' || alert.description.length > 4096)) {
+    return { valid: false, error: 'description must be a string of at most 4096 characters' };
+  }
+  for (const field of ['false_positive', 'reviewed']) {
+    if (alert[field] !== undefined && typeof alert[field] !== 'boolean') {
+      return { valid: false, error: `${field} must be boolean` };
+    }
+  }
+  if (alert.yara_match !== undefined && alert.yara_match !== null &&
+      (typeof alert.yara_match !== 'object' || Array.isArray(alert.yara_match))) {
+    return { valid: false, error: 'yara_match must be an object or null' };
+  }
+  if (alert.raw_payload_hash !== undefined && alert.raw_payload_hash !== null &&
+      typeof alert.raw_payload_hash !== 'string') {
+    return { valid: false, error: 'raw_payload_hash must be a string or null' };
+  }
+
+  return { valid: true };
+}
+
 class EngineIngestion extends EventEmitter {
   /**
    * @param {object} opts
@@ -38,6 +134,9 @@ class EngineIngestion extends EventEmitter {
     this.client = null;        // active engine connection (one at a time)
     this.running = false;
     this.buffer = '';
+    // Keep frames in wire order. Geo-IP lookups and Mongo writes are async;
+    // without a queue, a slow lookup could make the live feed reorder alerts.
+    this.processing = Promise.resolve();
 
     this.stats = {
       connected: false,
@@ -45,6 +144,8 @@ class EngineIngestion extends EventEmitter {
       alerts: 0,
       duplicates: 0,
       malformed: 0,
+      invalid: 0,
+      failures: 0,
       last_alert_at: null,
     };
   }
@@ -122,6 +223,11 @@ class EngineIngestion extends EventEmitter {
       this.buffer = this.buffer.slice(nl + 1);
       if (!line) continue;
 
+      if (Buffer.byteLength(line, 'utf8') > MAX_FRAME_BYTES) {
+        this.stats.malformed += 1;
+        continue;
+      }
+
       let alert;
       try {
         alert = JSON.parse(line);
@@ -135,12 +241,29 @@ class EngineIngestion extends EventEmitter {
         continue;
       }
 
-      this._handleAlert(alert);
+      const validation = validateAlert(alert);
+      if (!validation.valid) {
+        this.stats.invalid += 1;
+        this.stats.malformed += 1;
+        if (this.stats.invalid <= 3) {
+          console.warn(`[ingestion] invalid alert skipped: ${validation.error}`);
+        }
+        continue;
+      }
+
+      // Preserve NDJSON order and make storage failures observable instead
+      // of creating unhandled promise rejections in the socket callback.
+      this.processing = this.processing
+        .then(() => this._handleAlert(alert))
+        .catch((err) => {
+          this.stats.failures += 1;
+          console.error('[ingestion] alert handling failed:', err.message);
+        });
     }
 
     // Guard against a runaway buffer (no newlines at all — protocol
     // violation or binary garbage).
-    if (this.buffer.length > 1024 * 1024) {
+    if (Buffer.byteLength(this.buffer, 'utf8') > MAX_FRAME_BYTES) {
       this.stats.malformed += 1;
       this.buffer = '';
     }
@@ -189,4 +312,4 @@ class EngineIngestion extends EventEmitter {
   }
 }
 
-module.exports = { EngineIngestion };
+module.exports = { EngineIngestion, validateAlert };

@@ -7,6 +7,7 @@
  */
 
 #include "HoneypotDetector.h"
+#include "../parsers/UDPParser.h"
 
 
 // ============================================================================
@@ -47,11 +48,9 @@ std::vector<Alert> HoneypotDetector::process(const RawPacket& raw,
         dport = tcp->dst_port;
         proto = Protocol::TCP;
     } else if (ip.protocol == IPPROTO_UDP_NUM) {
-        if (ip.transport_offset + 4 <= raw.capture_length) {
-            const uint8_t* udp_hdr = raw.data + ip.transport_offset;
-            dport = static_cast<uint16_t>(
-                (static_cast<uint16_t>(udp_hdr[2]) << 8) | udp_hdr[3]);
-        }
+        auto udp = UDPParser::parse(raw, ip);
+        if (!udp) return {};
+        dport = udp->dst_port;
         proto = Protocol::UDP;
     }
 

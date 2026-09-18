@@ -10,6 +10,9 @@
 #
 #  Options:
 #    SENTINELX_ENABLE_TESTS   — build the test suite (default ON)
+#    SENTINELX_BUILD_CAPTURE  — enable libpcap live capture detection (ON)
+#    SENTINELX_BUILD_YARA     — enable libyara signature scanning (ON)
+#    SENTINELX_FORCE_MINIMAL  — disable both optional integrations
 #
 #  Dependencies:
 #    libpcap   — required for LIVE capture. If not found, the engine is
@@ -37,8 +40,20 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 option(SENTINELX_ENABLE_TESTS "Build unit tests" ON)
+option(SENTINELX_BUILD_CAPTURE
+       "Build live capture support when libpcap is available" ON)
+option(SENTINELX_BUILD_YARA
+       "Build YARA signature scanning when libyara is available" ON)
 option(SENTINELX_FORCE_MINIMAL
        "Build without libpcap and libyara (replay-only, no YARA)" OFF)
+
+# SENTINELX_FORCE_MINIMAL is intentionally kept as a convenient CI/demo
+# switch. The narrower BUILD_* switches are useful when, for example,
+# libpcap is installed but a replay-only build is desired.
+if(SENTINELX_FORCE_MINIMAL)
+    set(SENTINELX_BUILD_CAPTURE OFF CACHE BOOL "" FORCE)
+    set(SENTINELX_BUILD_YARA OFF CACHE BOOL "" FORCE)
+endif()
 
 # ── Compiler warnings ─────────────────────────────────────────────────────
 add_compile_options(-Wall -Wextra -Wno-unused-parameter)
@@ -57,7 +72,7 @@ endif()
 set(SENTINELX_WITH_LIBPCAP OFF)
 set(SENTINELX_WITH_YARA OFF)
 
-if(NOT SENTINELX_FORCE_MINIMAL)
+if(NOT SENTINELX_FORCE_MINIMAL AND SENTINELX_BUILD_CAPTURE)
     # ── libpcap ─────────────────────────────────────────────────────────
     find_path(PCAP_INCLUDE_DIR pcap/pcap.h)
     find_library(PCAP_LIBRARY NAMES pcap)
@@ -86,7 +101,9 @@ if(NOT SENTINELX_FORCE_MINIMAL)
         message(STATUS "libpcap not found — building WITHOUT live capture "
                        "(replay mode still available)")
     endif()
+endif()
 
+if(NOT SENTINELX_FORCE_MINIMAL AND SENTINELX_BUILD_YARA)
     # ── libyara ─────────────────────────────────────────────────────────
     find_path(YARA_INCLUDE_DIR yara.h)
     find_library(YARA_LIBRARY NAMES yara)
@@ -122,6 +139,7 @@ add_library(sentinelx_core STATIC
     src/capture/PcapReplayer.cpp
     src/parsers/IPParser.cpp
     src/parsers/TCPParser.cpp
+    src/parsers/UDPParser.cpp
     src/parsers/HTTPParser.cpp
     src/detectors/PortScanDetector.cpp
     src/detectors/SYNFloodDetector.cpp

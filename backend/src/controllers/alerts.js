@@ -6,9 +6,21 @@
 
 async function listAlerts(req, res, next) {
   try {
-    const { items, total, page, limit } = await req.app.locals.store.list(
-      req.query
-    );
+    const query = { ...req.query };
+    for (const field of ['from', 'to']) {
+      if (query[field] !== undefined && !Number.isFinite(Date.parse(query[field]))) {
+        return res.status(400).json({ error: `${field} must be a valid date` });
+      }
+    }
+    if (query.from && query.to && Date.parse(query.from) > Date.parse(query.to)) {
+      return res.status(400).json({ error: 'from must be before or equal to to' });
+    }
+    for (const field of ['reviewed', 'false_positive']) {
+      if (query[field] !== undefined && !['true', 'false', '1', '0'].includes(query[field])) {
+        return res.status(400).json({ error: `${field} must be true or false` });
+      }
+    }
+    const { items, total, page, limit } = await req.app.locals.store.list(query);
     res.json({ items, total, page, limit });
   } catch (err) {
     next(err);
@@ -31,11 +43,16 @@ async function updateAlertTriage(req, res, next) {
   try {
     const body = req.body || {};
     const patch = {};
+    for (const field of ['false_positive', 'reviewed']) {
+      if (body[field] !== undefined && typeof body[field] !== 'boolean') {
+        return res.status(400).json({ error: `${field} must be boolean` });
+      }
+    }
     if (body.false_positive !== undefined) {
-      patch.false_positive = !!body.false_positive;
+      patch.false_positive = body.false_positive;
     }
     if (body.reviewed !== undefined) {
-      patch.reviewed = !!body.reviewed;
+      patch.reviewed = body.reviewed;
     }
     if (Object.keys(patch).length === 0) {
       return res
